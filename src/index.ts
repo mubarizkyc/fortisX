@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import { createMultisigInstruction } from './commands/createMultisig';
 // Import the new deposit function (you will need to create this in your commands folder)
 import { publicDeposit } from './commands/publicDeposit';
+import { CloakDeposit } from './commands/CloakDeposit'; // Import the new function
 import { PublicKey, Keypair } from '@solana/web3.js';
 import { readFileSync } from "fs";
 import {
@@ -128,6 +129,49 @@ cli
             process.exit(1);
         }
     });
+cli
+    .command('cloak_deposit', 'Deposit SOL into Cloak Protocol (Private)')
+    .option('--keypair <path>', 'Path to the signer keypair file (JSON)', { default: "/home/mubariz/.config/solana/id.json" })
+    .option('--amount <lamports>', 'Amount to deposit in lamports', { type: Number })
+    .action(async (options) => {
+        try {
+            // 1. Validate Amount
+            const amount = options.amount;
+            if (!amount || amount <= 0) {
+                throw new Error('Valid --amount (in lamports) is required');
+            }
+
+            // 2. Load Signer Keypair
+            const keypairPath = path.resolve(options.keypair);
+            console.log(chalk.gray(`Loading keypair from: ${keypairPath}`));
+
+            let signer: Keypair;
+            try {
+                const fileContent = readFileSync(keypairPath, "utf8");
+                const secretKey = Uint8Array.from(JSON.parse(fileContent));
+                signer = Keypair.fromSecretKey(secretKey);
+            } catch (e) {
+                throw new Error(`Failed to load keypair at ${keypairPath}. Ensure it is a valid Solana JSON keypair.`);
+            }
+
+            console.log(chalk.blue('Signer:'), signer.publicKey.toBase58());
+            console.log(chalk.blue('Amount (Lamports):'), amount);
+            console.log(chalk.yellow('⏳ Processing private deposit... this may take a moment.'));
+
+            // 3. Call CloakDeposit
+            // Note: CloakDeposit is async and handles its own connection/transaction logic
+            await CloakDeposit(BigInt(amount), signer);
+
+            console.log(chalk.green('✅ Cloak Deposit Process Completed!'));
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Error:'), error.message);
+            // Optional: log stack trace for debugging complex async errors
+            // console.error(error.stack);
+            process.exit(1);
+        }
+    });
+
 cli.help();
 cli.version('1.0.0');
 cli.parse();
