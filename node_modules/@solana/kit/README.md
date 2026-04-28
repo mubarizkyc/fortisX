@@ -1,0 +1,222 @@
+[![npm][npm-image]][npm-url]
+[![npm-downloads][npm-downloads-image]][npm-url]
+<br />
+[![code-style-prettier][code-style-prettier-image]][code-style-prettier-url]
+
+[code-style-prettier-image]: https://img.shields.io/badge/code_style-prettier-ff69b4.svg?style=flat-square
+[code-style-prettier-url]: https://github.com/prettier/prettier
+[npm-downloads-image]: https://img.shields.io/npm/dm/@solana/kit?style=flat
+[npm-image]: https://img.shields.io/npm/v/@solana/kit?style=flat
+[npm-url]: https://www.npmjs.com/package/@solana/kit
+
+# @solana/kit
+
+This is the JavaScript SDK for building Solana apps for Node, web, and React Native.
+
+## Functions
+
+In addition to re-exporting functions from packages in the `@solana/*` namespace, this package offers additional helpers for building Solana applications, with sensible defaults.
+
+### `airdropFactory({rpc, rpcSubscriptions})`
+
+Returns a function that you can call to airdrop a certain amount of `Lamports` to a Solana address.
+
+```ts
+import { address, airdropFactory, createSolanaRpc, createSolanaRpcSubscriptions, devnet, lamports } from '@solana/kit';
+
+const rpc = createSolanaRpc(devnet('http://127.0.0.1:8899'));
+const rpcSubscriptions = createSolanaRpcSubscriptions(devnet('ws://127.0.0.1:8900'));
+
+const airdrop = airdropFactory({ rpc, rpcSubscriptions });
+
+await airdrop({
+    commitment: 'confirmed',
+    recipientAddress: address('FnHyam9w4NZoWR6mKN1CuGBritdsEWZQa4Z4oawLZGxa'),
+    lamports: lamports(10_000_000n),
+});
+```
+
+> [!NOTE] This only works on test clusters.
+
+### `createReactiveStoreWithInitialValueAndSlotTracking(config)`
+
+Creates a `ReactiveStore` that combines an initial RPC fetch with an ongoing subscription to keep its state up to date. Uses slot-based comparison to ensure only the most recent value is kept, regardless of whether it came from the RPC response or a subscription notification.
+
+The returned store is compatible with React's `useSyncExternalStore`, Svelte stores, Solid's `from()`, and any other reactive primitive that expects a `{ subscribe, getState }` contract.
+
+```ts
+import {
+    address,
+    createReactiveStoreWithInitialValueAndSlotTracking,
+    createSolanaRpc,
+    createSolanaRpcSubscriptions,
+} from '@solana/kit';
+
+const rpc = createSolanaRpc('http://127.0.0.1:8899');
+const rpcSubscriptions = createSolanaRpcSubscriptions('ws://127.0.0.1:8900');
+const myAddress = address('FnHyam9w4NZoWR6mKN1CuGBritdsEWZQa4Z4oawLZGxa');
+
+const balanceStore = createReactiveStoreWithInitialValueAndSlotTracking({
+    abortSignal: AbortSignal.timeout(60_000),
+    rpcRequest: rpc.getBalance(myAddress, { commitment: 'confirmed' }),
+    rpcValueMapper: lamports => lamports,
+    rpcSubscriptionRequest: rpcSubscriptions.accountNotifications(myAddress),
+    rpcSubscriptionValueMapper: ({ lamports }) => lamports,
+});
+
+const unsubscribe = balanceStore.subscribe(() => {
+    const error = balanceStore.getError();
+    if (error) console.error('Error:', error);
+    else console.log('Balance:', balanceStore.getState());
+});
+```
+
+### `decompileTransactionMessageFetchingLookupTables(compiledTransactionMessage, rpc, config)`
+
+Returns a `TransactionMessage` from a `CompiledTransactionMessage`. If any of the accounts in the compiled message require an address lookup table to find their address, this function will use the supplied RPC instance to fetch the contents of the address lookup table from the network.
+
+### `fetchLookupTables(lookupTableAddresses, rpc, config)`
+
+Given a list of addresses belonging to address lookup tables, returns a map of lookup table addresses to an ordered array of the addresses they contain.
+
+### `getMinimumBalanceForRentExemption(space)` (Deprecated)
+
+> **Deprecated**: The minimum balance for an account is being actively reduced (see [SIMD-0437](https://github.com/solana-foundation/solana-improvement-documents/pull/437)) and is expected to become dynamic in future Solana upgrades (see [SIMD-0194](https://github.com/solana-foundation/solana-improvement-documents/pull/194) and [SIMD-0389](https://github.com/solana-foundation/solana-improvement-documents/pull/389)), meaning a hardcoded local computation will no longer return accurate results. Use the `getMinimumBalanceForRentExemption` RPC method or a `ClientWithGetMinimumBalance` plugin instead. This function will be removed in v7.
+
+Calculates the minimum `Lamports` required to make an account rent exempt for a given data size, without performing an RPC call.
+
+```ts
+import { getMinimumBalanceForRentExemption } from '@solana/kit';
+
+const mintSize = 82n;
+const rentExemptLamports = getMinimumBalanceForRentExemption(mintSize);
+```
+
+### Compute Unit Limit Estimation
+
+Correctly budgeting a compute unit limit for your transaction message can increase the probability that your transaction will be accepted for processing. If you don't declare a compute unit limit on your transaction, validators will assume an upper limit of 200K compute units (CU) per instruction.
+
+Since validators have an incentive to pack as many transactions into each block as possible, they may choose to include transactions that they know will fit into the remaining compute budget for the current block over transactions that might not. For this reason, you should set a compute unit limit on each of your transaction messages, whenever possible.
+
+#### `estimateComputeUnitLimitFactory({rpc})`
+
+Returns a function that estimates the compute units consumed by a transaction message by simulating it. The estimator temporarily sets the compute unit limit to the maximum (1,400,000) before simulating, so the simulation does not fail due to compute unit exhaustion.
+
+```ts
+import { createSolanaRpc, estimateComputeUnitLimitFactory, setTransactionMessageComputeUnitLimit } from '@solana/kit';
+
+const rpc = createSolanaRpc('http://127.0.0.1:8899');
+const estimateComputeUnitLimit = estimateComputeUnitLimitFactory({ rpc });
+
+const computeUnitsEstimate = await estimateComputeUnitLimit(transactionMessage);
+
+const transactionMessageWithComputeUnitLimit = setTransactionMessageComputeUnitLimit(
+    computeUnitsEstimate,
+    transactionMessage,
+);
+```
+
+> [!NOTE]
+> For legacy and v0 transactions, if the transaction message does not already have a `SetComputeUnitLimit` instruction, the estimator will add one before simulation. This ensures that the compute unit consumption of the instruction itself is included in the estimate.
+
+#### `estimateAndSetComputeUnitLimitFactory(estimator)`
+
+Returns a function that estimates the compute unit limit for a transaction message and sets it directly on the message. If the message already has an explicit compute unit limit (one that is not the provisory value of `0` or the maximum of `1,400,000`), the message is returned unchanged. This is designed to work with `fillTransactionMessageProvisoryComputeUnitLimit`.
+
+```ts
+import { estimateAndSetComputeUnitLimitFactory, estimateComputeUnitLimitFactory } from '@solana/kit';
+
+const estimator = estimateComputeUnitLimitFactory({ rpc });
+const estimateAndSetComputeUnitLimit = estimateAndSetComputeUnitLimitFactory(estimator);
+
+const updatedMessage = await estimateAndSetComputeUnitLimit(transactionMessage);
+```
+
+#### `fillTransactionMessageProvisoryComputeUnitLimit(transactionMessage)`
+
+Sets the compute unit limit to a provisory value of `0` if no compute unit limit is currently set on the transaction message. This is useful during transaction construction to reserve space for a compute unit limit that will later be replaced with an actual estimate.
+
+```ts
+import { fillTransactionMessageProvisoryComputeUnitLimit } from '@solana/kit';
+
+const messageWithProvisoryLimit = fillTransactionMessageProvisoryComputeUnitLimit(transactionMessage);
+```
+
+> [!WARNING]
+> The compute unit estimate is just that -- an estimate. The compute unit consumption of the actual transaction might be higher or lower than what was observed in simulation. Unless you are confident that your particular transaction message will consume the same or fewer compute units as was estimated, you might like to augment the estimate by either a fixed number of CUs or a multiplier.
+
+> [!NOTE]
+> If you are preparing an _unsigned_ transaction, destined to be signed and submitted to the network by a wallet, you might like to leave it up to the wallet to determine the compute unit limit. Consider that the wallet might have a more global view of how many compute units certain types of transactions consume, and might be able to make better estimates of an appropriate compute unit budget.
+
+### `sendAndConfirmTransactionFactory({rpc, rpcSubscriptions})`
+
+Returns a function that you can call to send a blockhash-based transaction to the network and to wait until it has been confirmed.
+
+```ts
+import { isSolanaError, sendAndConfirmTransactionFactory, SOLANA_ERROR__BLOCK_HEIGHT_EXCEEDED } from '@solana/kit';
+
+const sendAndConfirmTransaction = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
+
+try {
+    await sendAndConfirmTransaction(transaction, { commitment: 'confirmed' });
+} catch (e) {
+    if (isSolanaError(e, SOLANA_ERROR__BLOCK_HEIGHT_EXCEEDED)) {
+        console.error('This transaction depends on a blockhash that has expired');
+    } else {
+        throw e;
+    }
+}
+```
+
+### `sendAndConfirmDurableNonceTransactionFactory({rpc, rpcSubscriptions})`
+
+Returns a function that you can call to send a nonce-based transaction to the network and to wait until it has been confirmed.
+
+```ts
+import {
+    isSolanaError,
+    sendAndConfirmDurableNonceTransactionFactory,
+    SOLANA_ERROR__INVALID_NONCE,
+    SOLANA_ERROR__NONCE_ACCOUNT_NOT_FOUND,
+} from '@solana/kit';
+
+const sendAndConfirmNonceTransaction = sendAndConfirmDurableNonceTransactionFactory({ rpc, rpcSubscriptions });
+
+try {
+    await sendAndConfirmNonceTransaction(transaction, { commitment: 'confirmed' });
+} catch (e) {
+    if (isSolanaError(e, SOLANA_ERROR__NONCE_ACCOUNT_NOT_FOUND)) {
+        console.error(
+            'The lifetime specified by this transaction refers to a nonce account ' +
+                `\`${e.context.nonceAccountAddress}\` that does not exist`,
+        );
+    } else if (isSolanaError(e, SOLANA_ERROR__INVALID_NONCE)) {
+        console.error('This transaction depends on a nonce that is no longer valid');
+    } else {
+        throw e;
+    }
+}
+```
+
+### `sendTransactionWithoutConfirmingFactory({rpc, rpcSubscriptions})`
+
+Returns a function that you can call to send a transaction with any kind of lifetime to the network without waiting for it to be confirmed.
+
+```ts
+import {
+    sendTransactionWithoutConfirmingFactory,
+    SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+} from '@solana/kit';
+
+const sendTransaction = sendTransactionWithoutConfirmingFactory({ rpc });
+
+try {
+    await sendTransaction(transaction, { commitment: 'confirmed' });
+} catch (e) {
+    if (isSolanaError(e, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)) {
+        console.error('The transaction failed in simulation', e.cause);
+    } else {
+        throw e;
+    }
+}
+```
