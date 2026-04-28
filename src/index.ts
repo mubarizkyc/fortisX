@@ -3,6 +3,7 @@ import cac from 'cac';
 import chalk from 'chalk';
 import { createMultisigInstruction } from './commands/createMultisig';
 // Import the new deposit function (you will need to create this in your commands folder)
+import { PrivateDeposit } from './commands/privateDeposit';
 import { publicDeposit } from './commands/publicDeposit';
 import { CloakDeposit } from './commands/CloakDeposit'; // Import the new function
 import { PublicKey, Keypair } from '@solana/web3.js';
@@ -171,7 +172,51 @@ cli
             process.exit(1);
         }
     });
+// --- Updated Command: private_deposit ---
+cli
+    .command('private_deposit', 'Transfer from Private UTXO to Multisig Treasury')
+    .option('--keypair <path>', 'Path to the signer keypair file (JSON)', { default: "/home/mubariz/.config/solana/id.json" })
+    .option('--amount <lamports>', 'Amount to transfer in lamports', { type: Number })
+    .option('--treasury-id <id>', 'The Treasury ID (BigInt) to deposit into') // Changed name and description
+    .option('--utxo <base58>', 'Your existing Private UTXO (Base58 string) to spend')
+    .action(async (options) => {
+        try {
+            // 1. Validate Inputs
+            const amount = options.amount;
+            if (!amount || amount <= 0) throw new Error('Valid --amount (in lamports) is required');
 
+            if (!options.treasuryId) throw new Error('--treasury-id <bigint> is required');
+
+            // Parse the BigInt (remove 'n' if user pasted it, though JS handles it usually)
+            const treasuryId = BigInt(options.treasuryId);
+
+            if (!options.utxo) throw new Error('--utxo <base58> is required');
+
+            // 2. Load Signer
+            const keypairPath = path.resolve(options.keypair);
+            const signer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(keypairPath, "utf8"))));
+
+            console.log(chalk.blue('Signer:'), signer.publicKey.toBase58());
+            console.log(chalk.blue('Treasury ID (BigInt):'), treasuryId.toString());
+            console.log(chalk.blue('Amount (Lamports):'), amount);
+            console.log(chalk.yellow('⏳ Processing private transfer...'));
+
+            // 3. Call PrivateDeposit
+            // Note: We are passing treasuryId as bigint now
+            await PrivateDeposit(
+                BigInt(amount),
+                signer,
+                treasuryId, // Pass as bigint
+                options.utxo
+            );
+
+            console.log(chalk.green('✅ Private Transfer Completed!'));
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Error:'), error.message);
+            process.exit(1);
+        }
+    });
 cli.help();
 cli.version('1.0.0');
 cli.parse();

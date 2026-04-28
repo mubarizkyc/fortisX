@@ -8,6 +8,7 @@
     "@cloak.dev/sdk-devnet": "^0.1.5-devnet.0",
     "@solana/compat": "^6.8.0",
     "@solana/web3.js": "^1.98.4",
+    "bn.js": "^5.2.3",
     "cac": "^7.0.0",
     "chalk": "^5.6.2",
     "ed2curve": "^0.3.0",

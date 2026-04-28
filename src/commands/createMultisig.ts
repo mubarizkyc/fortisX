@@ -146,7 +146,7 @@ export async function createMultisigInstruction(
     const treasuryKp = await generateUtxoKeypair()
     const treasuryPkBytes = bigintToBytes32(treasuryKp.privateKey)
     const shares = await split(treasuryPkBytes, members.length, threshold)
-
+    console.log("treasury address", treasuryKp.publicKey);
     const encryptedShares = members.map((member, i) => ({
         member,
         ciphertext: encryptShareForMember(shares[i], member)
