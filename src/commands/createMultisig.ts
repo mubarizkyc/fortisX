@@ -132,7 +132,7 @@ function encryptShareForMember(
     result.set(ciphertext, 56)
     return result
 }
-export async function createMultisigInstruction(
+export async function createMultisig(
     members: PublicKey[],
     threshold: number,
     rentCollector: PublicKey,

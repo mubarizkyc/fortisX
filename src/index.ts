@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import cac from 'cac';
 import chalk from 'chalk';
-import { createMultisigInstruction } from './commands/createMultisig';
+import { createMultisig } from './commands/createMultisig';
 // Import the new deposit function (you will need to create this in your commands folder)
 import { PrivateDeposit } from './commands/privateDeposit';
 import { publicDeposit } from './commands/publicDeposit';
-import { CloakDeposit } from './commands/CloakDeposit'; // Import the new function
+import { CloakDeposit } from './commands/cloakDeposit'; // Import the new function
 import { PublicKey, Keypair } from '@solana/web3.js';
 import { readFileSync } from "fs";
 import {
@@ -64,7 +64,7 @@ cli
 
             // 3. Call the pure function
             // Note: Ensure createMultisigInstruction returns the result so you can log it/send it
-            const result = await createMultisigInstruction(
+            const result = await createMultisig(
                 members,
                 threshold,
                 creator.publicKey,

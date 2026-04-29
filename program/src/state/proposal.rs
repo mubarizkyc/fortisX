@@ -24,6 +24,8 @@ pub struct ProposalHeader {
     pub deadline: i64,
     /// The status of the transaction.
     pub status: u8,
+    /// proposal_type
+    pub proposal_type: u8, //0 for public ,1 for private
     /// PDA bump.
     pub bump: u8,
 }

@@ -1,5 +1,5 @@
 use crate::state::{
-    MULTISIG_HEADER_SIZE, MultisigHeader, ProposalHeader, SEED_TRANSACTION,
+    MULTISIG_HEADER_SIZE, Multisig, ProposalHeader, SEED_TRANSACTION,
     seeds::{SEED_EPHEMERAL_SIGNER, SEED_MULTISIG, SEED_PREFIX, SEED_PROPOSAL, SEED_VAULT},
 };
 use arrayvec::ArrayVec;
@@ -15,7 +15,7 @@ use pinocchio::{
 };
 use pinocchio_system::create_account_with_minimum_balance_signed;
 pub const MAX_EPHEMERAL_SIGNERS: usize = 16;
-pub const PROPOSAL_HEADER_SIZE: usize = 58;
+pub const PROPOSAL_HEADER_SIZE: usize = 59;
 //ARGS:ProposalCreate + TransactionMessage(raw [u8])
 pub fn process_create_proposal(accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
     //creator will be rent payer as well
@@ -28,7 +28,7 @@ pub fn process_create_proposal(accounts: &[AccountInfo], data: &[u8]) -> Program
             .split_at_mut(MULTISIG_HEADER_SIZE)
     };
 
-    let multisig_state = unsafe { &mut *(multisig_data.0.as_mut_ptr() as *mut MultisigHeader) };
+    let multisig_state = unsafe { &mut *(multisig_data.0.as_mut_ptr() as *mut Multisig) };
     let members_len: u32 = unsafe { *(multisig_data.1[0..4].as_ptr() as *const u32) };
     //multisig_pda_verification
     let (ms_pda, ms_bump) = pubkey::find_program_address(
@@ -43,15 +43,16 @@ pub fn process_create_proposal(accounts: &[AccountInfo], data: &[u8]) -> Program
         return Err(ProgramError::InvalidAccountOwner);
     }
     //verify member
-    if !multisig_state.is_member(members_len as u16, *creator.key(), &multisig_data.1[4..]) {
+    if !multisig_state.is_member(&multisig_data.1[4..], creator.key()) {
         solana_msg::sol_log("member not authorized");
         return Err(ProgramError::IncorrectAuthority);
     }
     //create an account for proposal
     let ephemeral_signers = data[0];
-    let voting_deadline = unsafe { *(data[1..9].as_ptr() as *const i64) };
-    let tx_message_len = unsafe { *(data[9..13].as_ptr() as *const u32) as usize };
-    let tx_message = &data[13..13 + tx_message_len];
+    let proposal_type = data[1];
+    let voting_deadline = unsafe { *(data[2..10].as_ptr() as *const i64) };
+    let tx_message_len = unsafe { *(data[10..14].as_ptr() as *const u32) as usize };
+    let tx_message = &data[14..14 + tx_message_len];
     //update multisig transaction index;
 
     //updating wallet to current transaction index
@@ -99,11 +100,11 @@ pub fn process_create_proposal(accounts: &[AccountInfo], data: &[u8]) -> Program
         return Err(ProgramError::InvalidAccountOwner);
     }
     let bump_binding = [proposal_bump];
-    // proposal size: 32 + 8 + 1 + 8 + 8 + 1 + 4 + (32 * members_len)
+    // proposal size: 32 + 8  +1 +1 + 8 + 8 + 1 + 4 + (32 * members_len)
     // ensure multisig_state.members_len exists and cast safely
     create_account_with_minimum_balance_signed(
         proposal,
-        32 + 8 + 1 + 8 + 8 + 1 + 4 + (32 * members_len) as usize,
+        32 + 8 + 1 + 1 + 8 + 8 + 1 + 4 + (32 * members_len) as usize,
         &crate::ID,
         creator,
         None,
@@ -146,6 +147,7 @@ pub fn process_create_proposal(accounts: &[AccountInfo], data: &[u8]) -> Program
     proposal_state.timestamp = Clock::get()?.unix_timestamp;
     proposal_state.deadline = voting_deadline;
     proposal_state.bump = proposal_bump;
+    proposal_state.proposal_type = proposal_type;
     //current approved count=0;
     proposal_data[PROPOSAL_HEADER_SIZE..PROPOSAL_HEADER_SIZE + 4]
         .copy_from_slice(&(0u32).to_le_bytes());

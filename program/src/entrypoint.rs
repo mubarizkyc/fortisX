@@ -25,11 +25,12 @@ fn process_instruction(
             sol_log("multisigCreate");
             instruction::process_create_multisig(accounts, instruction_data)
         }
-        /*/
+
         1 => {
             sol_log("proposalCreate");
             instruction::process_create_proposal(accounts, instruction_data)
         }
+        /*
         2 => {
             sol_log("proposalApprove");
             instruction::process_approve_proposal(accounts, instruction_data)
