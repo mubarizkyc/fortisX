@@ -6,6 +6,7 @@ import { createMultisig } from './commands/createMultisig';
 import { PrivateDeposit } from './commands/privateDeposit';
 import { publicDeposit } from './commands/publicDeposit';
 import { CloakDeposit } from './commands/cloakDeposit'; // Import the new function
+import { createTransferProposal } from './commands/createTransferProposal';
 import { PublicKey, Keypair } from '@solana/web3.js';
 import { readFileSync } from "fs";
 import {
@@ -211,6 +212,35 @@ cli
             );
 
             console.log(chalk.green('✅ Private Transfer Completed!'));
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Error:'), error.message);
+            process.exit(1);
+        }
+    });
+cli
+    .command('create_transfer_proposal', 'Create a transfer proposal for multisig')
+    .option('--keypair <path>', 'Path to creator keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
+    .option('--multisig <address>', 'Multisig account address')
+    .option('--target <address>', 'Transfer recipient address')
+    .option('--amount <lamports>', 'Amount in lamports', { type: Number })
+    .action(async (options) => {
+        try {
+            const multisig = new PublicKey(options.multisig);
+            const target = new PublicKey(options.target);
+            const amount = BigInt(options.amount);
+
+
+            console.log(chalk.yellow('Creating transfer proposal...'));
+
+            await createTransferProposal(
+                options.keypair,
+                multisig,
+                target,
+                amount,
+            );
+
+            console.log(chalk.green('✅ Done!'));
 
         } catch (error: any) {
             console.error(chalk.red('❌ Error:'), error.message);

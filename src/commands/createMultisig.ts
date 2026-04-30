@@ -137,7 +137,9 @@ export async function createMultisig(
     threshold: number,
     rentCollector: PublicKey,
     creatorKey: Keypair,
+    url: String,
 ) {
+    const connection = new Connection("https://api.devnet.solana.com")
     if (members.length === 0) throw new Error('At least one member required')
     if (threshold <= 0 || threshold > members.length) {
         throw new Error(`Invalid threshold ${threshold} for ${members.length} members`)

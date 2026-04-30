@@ -18,6 +18,7 @@ pub const MAX_EPHEMERAL_SIGNERS: usize = 16;
 pub const PROPOSAL_HEADER_SIZE: usize = 59;
 //ARGS:ProposalCreate + TransactionMessage(raw [u8])
 pub fn process_create_proposal(accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    return Ok(());
     //creator will be rent payer as well
     let [multisig, vault_transaction, creator, proposal, _] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
