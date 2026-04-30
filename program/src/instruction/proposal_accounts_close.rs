@@ -2,7 +2,7 @@ use crate::{
     instruction::PROPOSAL_HEADER_SIZE,
     state::{
         ProposalHeader, SEED_TRANSACTION,
-        multisig::{MULTISIG_HEADER_SIZE, MultisigHeader},
+        multisig::{MULTISIG_HEADER_SIZE, Multisig},
         seeds::{SEED_MULTISIG, SEED_PREFIX, SEED_PROPOSAL},
     },
 };
@@ -29,7 +29,7 @@ pub fn process_account_close(accounts: &[AccountInfo], data: &[u8]) -> ProgramRe
     }
     let transaction_index: u64 = unsafe { *(transaction_data[64..72].as_ptr() as *const u64) };
     let multisig_state =
-        unsafe { &*(multisig_data[..MULTISIG_HEADER_SIZE].as_ptr() as *const MultisigHeader) };
+        unsafe { &*(multisig_data[..MULTISIG_HEADER_SIZE].as_ptr() as *const Multisig) };
     let (ms_pda, ms_bump) = pubkey::find_program_address(
         &[
             SEED_PREFIX,

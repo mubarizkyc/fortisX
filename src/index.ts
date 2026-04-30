@@ -3,11 +3,12 @@ import cac from 'cac';
 import chalk from 'chalk';
 import { createMultisig } from './commands/createMultisig';
 // Import the new deposit function (you will need to create this in your commands folder)
+import { approveProposal } from './commands/approveProposal';
 import { PrivateDeposit } from './commands/privateDeposit';
 import { publicDeposit } from './commands/publicDeposit';
 import { CloakDeposit } from './commands/cloakDeposit'; // Import the new function
 import { createTransferProposal } from './commands/createTransferProposal';
-import { PublicKey, Keypair } from '@solana/web3.js';
+import { PublicKey, Keypair, Connection } from '@solana/web3.js';
 import { readFileSync } from "fs";
 import {
     appendTransactionMessageInstruction,
@@ -220,7 +221,7 @@ cli
     });
 cli
     .command('create_transfer_proposal', 'Create a transfer proposal for multisig')
-    .option('--keypair <path>', 'Path to creator keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
+    .option('--keypair <path>', 'Path to creator keypair JSON')
     .option('--multisig <address>', 'Multisig account address')
     .option('--target <address>', 'Transfer recipient address')
     .option('--amount <lamports>', 'Amount in lamports', { type: Number })
@@ -232,15 +233,59 @@ cli
 
 
             console.log(chalk.yellow('Creating transfer proposal...'));
-
+            const creator = Keypair.fromSecretKey(
+                Uint8Array.from(JSON.parse(readFileSync(options.keypair, "utf8")))
+            );
             await createTransferProposal(
-                options.keypair,
+                creator,
                 multisig,
                 target,
                 amount,
             );
 
             console.log(chalk.green('✅ Done!'));
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Error:'), error.message);
+            process.exit(1);
+        }
+    });
+cli
+    .command('approve_proposal', 'Approve a multisig proposal as a member')
+    .option('--keypair <path>', 'Path to the member keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
+    .option('--multisig <address>', 'The Multisig Account Address')
+    .option('--proposal <number>', 'The Proposal  Number to approve')
+    .action(async (options) => {
+        try {
+            // 1. Validate Inputs
+            if (!options.multisig) throw new Error('--multisig is required');
+            if (!options.proposal) throw new Error('--proposal is required');
+
+            const multisigPubkey = new PublicKey(options.multisig);
+            const proposalNumber = BigInt(options.proposal);
+
+            // 2. Load Member Keypair
+            const keypairPath = path.resolve(options.keypair);
+            const member = Keypair.fromSecretKey(
+                Uint8Array.from(JSON.parse(readFileSync(keypairPath, 'utf8')))
+            );
+
+            // 3. Setup Connection
+            const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+
+            console.log(chalk.blue('Member:'), member.publicKey.toBase58());
+            console.log(chalk.blue('Multisig:'), multisigPubkey.toBase58());
+            console.log(chalk.yellow('⏳ Processing approval...'));
+
+            // 4. Call approveProposal
+            await approveProposal(
+                member,
+                multisigPubkey,
+                proposalNumber,
+                connection
+            );
+
+            console.log(chalk.green('✅ Approval Process Completed!'));
 
         } catch (error: any) {
             console.error(chalk.red('❌ Error:'), error.message);

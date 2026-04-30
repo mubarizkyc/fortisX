@@ -1,10 +1,10 @@
 pub mod create_multisig;
-//pub mod proposal_accounts_close;
-//pub mod proposal_approve;
+pub mod proposal_accounts_close;
+pub mod proposal_approve;
 pub mod proposal_create;
-//pub mod proposal_execute;
+pub mod proposal_execute;
 pub use create_multisig::*;
-//pub use proposal_accounts_close::*;
-//pub use proposal_approve::*;
+pub use proposal_accounts_close::*;
+pub use proposal_approve::*;
 pub use proposal_create::*;
-//pub use proposal_execute::*;
+pub use proposal_execute::*;

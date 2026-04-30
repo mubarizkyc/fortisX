@@ -30,11 +30,12 @@ fn process_instruction(
             sol_log("proposalCreate");
             instruction::process_create_proposal(accounts, instruction_data)
         }
-        /*
+
         2 => {
             sol_log("proposalApprove");
             instruction::process_approve_proposal(accounts, instruction_data)
         }
+
         3 => {
             sol_log("proposalExecute");
             instruction::process_execute_proposal(accounts, instruction_data)?;
@@ -45,7 +46,7 @@ fn process_instruction(
             instruction::process_account_close(accounts, instruction_data)?;
             Ok(())
         }
-        */
+
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }

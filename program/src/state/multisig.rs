@@ -23,19 +23,9 @@ impl Multisig {
         unsafe { &mut *(data.as_mut_ptr() as *mut Multisig) }
     }
 
-    // reads members from the dynamic tail after header
-    pub fn is_member(&self, data: &[u8], member: &Pubkey) -> bool {
-        let members_len = u32::from_le_bytes(
-            data[MULTISIG_HEADER_SIZE..MULTISIG_HEADER_SIZE + 4]
-                .try_into()
-                .unwrap(),
-        ) as usize;
-
-        let members_start = MULTISIG_HEADER_SIZE + 4;
-        for i in 0..members_len {
-            let start = members_start + i * 32;
-            let pk = Pubkey::from(TryInto::<[u8; 32]>::try_into(&data[start..start + 32]).unwrap());
-            if pk == *member {
+    pub fn is_member(&self, members_len: u16, member: Pubkey, members: &[u8]) -> bool {
+        for i in 0..members_len as usize {
+            if member.eq(&members[(i * 32)..(i * 32) + 32]) {
                 return true;
             }
         }

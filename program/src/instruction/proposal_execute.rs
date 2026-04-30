@@ -3,7 +3,7 @@ use crate::{
     instruction::{MAX_EPHEMERAL_SIGNERS, PROPOSAL_HEADER_SIZE},
     state::{
         ProposalHeader, SEED_TRANSACTION,
-        multisig::{MULTISIG_HEADER_SIZE, MultisigHeader},
+        multisig::{MULTISIG_HEADER_SIZE, Multisig},
         seeds::{SEED_EPHEMERAL_SIGNER, SEED_MULTISIG, SEED_PREFIX, SEED_PROPOSAL, SEED_VAULT},
     },
 };
@@ -46,7 +46,7 @@ pub fn process_execute_proposal(accounts: &[AccountInfo], data: &[u8]) -> Progra
             .borrow_data_unchecked()
             .split_at(MULTISIG_HEADER_SIZE)
     };
-    let multisig_state = unsafe { &*(multisig_data.0.as_ptr() as *const MultisigHeader) };
+    let multisig_state = unsafe { &*(multisig_data.0.as_ptr() as *const Multisig) };
     let members_len: u32 = unsafe { *(multisig_data.1[0..4].as_ptr() as *const u32) };
 
     let proposal_data = unsafe {

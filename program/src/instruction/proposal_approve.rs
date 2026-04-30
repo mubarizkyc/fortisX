@@ -2,7 +2,7 @@ use crate::{
     instruction::PROPOSAL_HEADER_SIZE,
     state::{
         ProposalHeader, SEED_TRANSACTION,
-        multisig::{MULTISIG_HEADER_SIZE, MultisigHeader},
+        multisig::{MULTISIG_HEADER_SIZE, Multisig},
         seeds::{SEED_MULTISIG, SEED_PREFIX, SEED_PROPOSAL},
     },
 };
@@ -16,6 +16,7 @@ use pinocchio::{
 };
 use solana_msg::sol_log;
 pub fn process_approve_proposal(accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    //return Ok(());
     //creator will be rent payer as well
     let [multisig, proposal, member] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -31,7 +32,7 @@ pub fn process_approve_proposal(accounts: &[AccountInfo], data: &[u8]) -> Progra
     let proposal_state = unsafe { &mut *(proposal_data.0.as_mut_ptr() as *mut ProposalHeader) };
     let multisig_data = unsafe { multisig.borrow_data_unchecked() };
     let multisig_state =
-        unsafe { &*(multisig_data[..MULTISIG_HEADER_SIZE].as_ptr() as *const MultisigHeader) };
+        unsafe { &*(multisig_data[..MULTISIG_HEADER_SIZE].as_ptr() as *const Multisig) };
     let members_len: u32 = unsafe {
         *(multisig_data[MULTISIG_HEADER_SIZE..MULTISIG_HEADER_SIZE + 4].as_ptr() as *const u32)
     };

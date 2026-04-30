@@ -83,11 +83,11 @@ export class CreateMultisigIxData {
         )
 
         return Buffer.concat([
-            Buffer.from([this.discriminator]),  // 1
-            thresholdBuf,                       // 2
-            rentCollector,                 // 33
-            membersLenBuf,                      // 4
-            membersBytes,                       // N*32
+            Buffer.from([this.discriminator]),  // 1(0)
+            thresholdBuf,                       // 2(1)
+            rentCollector,                      // 32(3)
+            membersLenBuf,                      // 4(35)
+            membersBytes,                       // N*32(39)
             sharesLenBuf,                       // 4
             sharesBytes,                        // N*(32+4+60)
             this.treasuryUtxoPubkey,            // 32
@@ -137,7 +137,6 @@ export async function createMultisig(
     threshold: number,
     rentCollector: PublicKey,
     creatorKey: Keypair,
-    url: String,
 ) {
     const connection = new Connection("https://api.devnet.solana.com")
     if (members.length === 0) throw new Error('At least one member required')
@@ -183,42 +182,22 @@ export async function createMultisig(
     treasuryPkBytes.fill(0)
     treasuryKp.privateKey = 0n
 
-    // LiteSVM test
-    const svm = new LiteSVM()
-    svm.addProgramFromFile(
-        fromLegacyPublicKey(PROGRAM_ID),
-        "/home/mubariz/Documents/SolDev/FortisX/program/target/deploy/program.so"
-    )
 
-    const keypairBytes = new Uint8Array(JSON.parse(
-        await readFile("/home/mubariz/.config/solana/id.json", 'utf-8')
-    ))
-    const signer = await createKeyPairSignerFromBytes(keypairBytes)
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
 
-    // ✅ airdrop BEFORE building transaction
-    svm.airdrop(signer.address, lamports(10_000_000_000n))
+    const msg = new TransactionMessage({
+        payerKey: creatorKey.publicKey,
+        recentBlockhash: blockhash,
+        instructions: [ix],
+    }).compileToV0Message(); // ✅ use lookup table
 
-    const transaction = await pipe(
-        createTransactionMessage({ version: 0 }),
-        (tx) => setTransactionMessageFeePayerSigner(signer, tx),
-        (tx) => svm.setTransactionMessageLifetimeUsingLatestBlockhash(tx),
-        (tx) => appendTransactionMessageInstruction(fromLegacyTransactionInstruction(ix), tx),
-        (tx) => signTransactionMessageWithSigners(tx),
-    )
+    const tx = new VersionedTransaction(msg);
+    tx.sign([creatorKey]);
+    const result = await connection.sendTransaction(tx, {
+        skipPreflight: true,
+        maxRetries: 0,
+    });
+    console.log("Tx Result: ", result);
 
-    const result = svm.sendTransaction(transaction)
 
-    if (result instanceof FailedTransactionMetadata) {
-        console.error(chalk.red('❌ Transaction Failed!'))
-        console.error('Error:', result.err())
-        try {
-            const meta = result.meta()
-            console.error('Logs:', meta?.logMessages)
-        } catch (e) {
-            console.error('No execution metadata available.')
-        }
-    } else {
-        console.log(chalk.green('✅ Success!'))
-        console.log('Logs:', result.logs())
-    }
 }
