@@ -205,6 +205,7 @@ pub fn process_create_proposal(accounts: &[AccountInfo], data: &[u8]) -> Program
             data_ptr.add(78 + (ephemeral_signers as usize)),
             tx_message_len,
         );
+        solana_msg::msg!("proposal created with tx_message_len: {}", tx_message_len);
     };
     let transaction_index = multisig_state.transaction_index;
     solana_msg::msg!("transaction index: {}", transaction_index);

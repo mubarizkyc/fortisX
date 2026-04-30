@@ -2,6 +2,7 @@
 import cac from 'cac';
 import chalk from 'chalk';
 import { createMultisig } from './commands/createMultisig';
+import { executeProposal } from './commands/executeProposal';
 // Import the new deposit function (you will need to create this in your commands folder)
 import { approveProposal } from './commands/approveProposal';
 import { PrivateDeposit } from './commands/privateDeposit';
@@ -289,6 +290,64 @@ cli
 
         } catch (error: any) {
             console.error(chalk.red('❌ Error:'), error.message);
+            process.exit(1);
+        }
+    });
+cli
+    .command('execute_proposal', 'Execute an approved multisig proposal')
+    .option('--keypair <path>', 'Path to the member keypair JSON', {
+        default: '/home/mubariz/.config/solana/id.json'
+    })
+    .option('--multisig <address>', 'The Multisig Account Address')
+    .option('--proposal-number <number>', 'The Proposal Number (transaction index) to execute', {
+        type: Number
+    })
+    .action(async (options) => {
+        try {
+            // 1. Validate Inputs
+            if (!options.multisig) {
+                throw new Error('--multisig <address> is required');
+            }
+            if (!options.proposalNumber || options.proposalNumber < 0) {
+                throw new Error('--proposal-number <number> is required (must be >= 0)');
+            }
+
+            const multisigPubkey = new PublicKey(options.multisig);
+            const proposalNumber = BigInt(options.proposalNumber);
+
+            // 2. Load Member Keypair
+            const keypairPath = path.resolve(options.keypair);
+            const member = Keypair.fromSecretKey(
+                Uint8Array.from(JSON.parse(readFileSync(keypairPath, 'utf8')))
+            );
+
+            // 3. Setup Connection
+
+
+            console.log(chalk.blue('Member:'), member.publicKey.toBase58());
+            console.log(chalk.blue('Multisig:'), multisigPubkey.toBase58());
+            console.log(chalk.blue('Proposal Number:'), proposalNumber.toString());
+            console.log(chalk.yellow('⏳ Executing proposal...'));
+
+            // 4. Call executeProposal
+            await executeProposal(
+                member,
+                multisigPubkey,
+                proposalNumber,
+            );
+
+            console.log(chalk.green('✅ Proposal Executed Successfully!'));
+            console.log('Proposal Number:', proposalNumber.toString());
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Execution Failed:'), error.message);
+
+            // Show program logs if available
+            if (error.logs && Array.isArray(error.logs)) {
+                console.error('📜 Program Logs:');
+                error.logs.forEach((log: string) => console.error('  ', log));
+            }
+
             process.exit(1);
         }
     });
