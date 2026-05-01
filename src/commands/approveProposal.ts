@@ -1,7 +1,6 @@
 // src/commands/approveProposal.ts
 import {
     PublicKey,
-    SystemProgram,
     TransactionInstruction,
     Keypair,
     Connection,
@@ -10,23 +9,7 @@ import {
 } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import chalk from 'chalk';
-
-// ⚠️ REPLACE WITH YOUR ACTUAL PROGRAM ID
-export const PROGRAM_ID = new PublicKey('CD6Pnc1gpUQ1XT1bzXEPs2QnqFMcQUHsiRKAV9iYXh36');
-
-// Seeds must match your Rust code exactly
-export const SEED_PREFIX = Buffer.from('multisig');
-export const SEED_TRANSACTION = Buffer.from('transaction');
-export const SEED_PROPOSAL = Buffer.from('proposal');
-export const SEED_MULTISIG = Buffer.from('multisig');
-
-// Account size constants (from Rust)
-export const MULTISIG_HEADER_SIZE = 128; // Adjust if your header size differs
-export const PROPOSAL_HEADER_SIZE = 59;
-
-// Instruction discriminators (define your enum values)
-export const DISCRIMINATOR_APPROVE_PROPOSAL = 2; // Adjust to match your Rust enum
-
+import { SEED_MULTISIG, SEED_PREFIX, SEED_TRANSACTION, SEED_PROPOSAL, PROGRAM_ID, DISCRIMINATOR_APPROVE_PROPOSAL, PROPOSAL_HEADER_SIZE, bigIntToLittleEndianBytes } from '../utils';
 export async function approveProposal(
     memberKeypair: Keypair,
     multisigAddress: PublicKey,
@@ -118,8 +101,6 @@ export async function approveProposal(
         console.log(chalk.yellow('Sending approval transaction...'));
         const signature = await connection.sendTransaction(tx, {
             skipPreflight: false,
-            maxRetries: 3,
-            preflightCommitment: 'confirmed',
         });
 
         console.log(chalk.blue('Signature:'), signature);
@@ -147,8 +128,6 @@ export async function approveProposal(
             }
         }
 
-
-
     } catch (error: any) {
         console.error(chalk.red('❌ Approval Failed:'), error.message);
 
@@ -160,15 +139,4 @@ export async function approveProposal(
 
         throw error;
     }
-}
-
-// Helper: Convert bigint to little-endian byte array
-function bigIntToLittleEndianBytes(value: bigint, byteLength: number): Uint8Array {
-    const bytes = new Uint8Array(byteLength);
-    let remaining = value;
-    for (let i = 0; i < byteLength; i++) {
-        bytes[i] = Number(remaining & 0xFFn);
-        remaining >>= 8n;
-    }
-    return bytes;
 }

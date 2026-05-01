@@ -126,7 +126,7 @@ export const compiledMsInstructionBeet =
         ],
         "CompiledMsInstruction"
     );
-export type TransactionMessage = {
+export type VaultTransactionMessage = {
     numSigners: number;
     numWritableSigners: number;
     numWritableNonSigners: number;
@@ -136,7 +136,7 @@ export type TransactionMessage = {
 };
 
 export const transactionMessageBeet =
-    new beet.FixableBeetArgsStruct<TransactionMessage>(
+    new beet.FixableBeetArgsStruct<VaultTransactionMessage>(
         [
             ["numSigners", beet.u8],
             ["numWritableSigners", beet.u8],
@@ -148,5 +148,5 @@ export const transactionMessageBeet =
                 smallArray(beet.u8, messageAddressTableLookupBeet),
             ],
         ],
-        "TransactionMessage"
+        "VaultTransactionMessage"
     );

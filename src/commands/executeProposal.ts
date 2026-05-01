@@ -11,17 +11,8 @@ import {
 } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import chalk from 'chalk';
-import { accountsForTransactionExecute } from '../utils';
-// ⚠️ REPLACE WITH YOUR ACTUAL PROGRAM ID
-export const PROGRAM_ID = new PublicKey('CD6Pnc1gpUQ1XT1bzXEPs2QnqFMcQUHsiRKAV9iYXh36');
-
-// Seeds must match your Rust code exactly
-export const SEED_PREFIX = Buffer.from('multisig');
-export const SEED_TRANSACTION = Buffer.from('transaction');
-export const SEED_PROPOSAL = Buffer.from('proposal');
-export const SEED_MULTISIG = Buffer.from('multisig');
-export const DISCRIMINATOR_EXECUTE_PROPOSAL = 3; // Adjust to match your Rust enum
-
+import { accountsForTransactionExecute, SEED_VAULT } from '../utils';
+import { SEED_MULTISIG, SEED_PREFIX, SEED_TRANSACTION, SEED_PROPOSAL, PROGRAM_ID, DISCRIMINATOR_APPROVE_PROPOSAL, PROPOSAL_HEADER_SIZE, bigIntToLittleEndianBytes } from '../utils';
 export async function executeProposal(
     memberKeypair: Keypair,
     multisigAddress: PublicKey,
@@ -30,9 +21,9 @@ export async function executeProposal(
 
     const [vaultPda] = PublicKey.findProgramAddressSync(
         [
-            Buffer.from('multisig'),
+            SEED_PREFIX,
             multisigAddress.toBytes(),
-            Buffer.from('vault')
+            SEED_VAULT
         ],
         PROGRAM_ID
     );
@@ -79,7 +70,9 @@ export async function executeProposal(
 
     const messageBytesStart = 78 + ephemeralSignersCount;
     const messageBytes = txAccount.data.slice(messageBytesStart);
-    console.log("hi");
+    console.log("vault pda", vaultPda.toBase58());
+    console.log("proposal pda", ProposalPda.toBase58());
+    console.log("transaction pda", txPda.toBase58());
     const { accountMetas, lookupTableAccounts } = await accountsForTransactionExecute({
         connection,
         messageBytes,
@@ -105,9 +98,10 @@ export async function executeProposal(
         { pubkey: memberKeypair.publicKey, isSigner: true, isWritable: false },
     ];
     keys.push(...accountMetas);
+    console.log(accountMetas);
 
     const dataBuffer = Buffer.alloc(1);
-    dataBuffer.writeUInt8(DISCRIMINATOR_EXECUTE_PROPOSAL, 0);
+    dataBuffer.writeUInt8(3, 0);
 
     const ix = new TransactionInstruction({
         programId: PROGRAM_ID,
@@ -124,12 +118,11 @@ export async function executeProposal(
 
     const tx = new VersionedTransaction(msg);
     tx.sign([memberKeypair]);
-
+    console.log("Executing proposal with the following details:");
     try {
         console.log(chalk.yellow('Sending execution transaction...'));
         const signature = await connection.sendTransaction(tx, {
             skipPreflight: false,
-            maxRetries: 3,
             preflightCommitment: 'confirmed',
         });
 
@@ -158,14 +151,4 @@ export async function executeProposal(
         }
         throw error;
     }
-}
-// Helper: Convert bigint to little-endian byte array
-function bigIntToLittleEndianBytes(value: bigint, byteLength: number): Uint8Array {
-    const bytes = new Uint8Array(byteLength);
-    let remaining = value;
-    for (let i = 0; i < byteLength; i++) {
-        bytes[i] = Number(remaining & 0xFFn);
-        remaining >>= 8n;
-    }
-    return bytes;
 }

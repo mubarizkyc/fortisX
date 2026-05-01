@@ -1,10 +1,10 @@
+// src/commands/cloakDeposit.ts
 import {
     transact,
     createZeroUtxo,
     NATIVE_SOL_MINT,
-    CLOAK_PROGRAM_ID, generateUtxoKeypair, createUtxo, swapWithChange,
+    CLOAK_PROGRAM_ID, generateUtxoKeypair, createUtxo,
     serializeUtxo,
-    deserializeUtxo
 } from "@cloak.dev/sdk-devnet"; // Ensure correct import path
 
 import {
@@ -13,7 +13,6 @@ import {
 
 } from '@solana/web3.js'
 
-// src/commands/cloakDeposit.ts
 
 export async function CloakDeposit(
     depoistAmount: bigint,

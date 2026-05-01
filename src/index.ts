@@ -11,17 +11,6 @@ import { CloakDeposit } from './commands/cloakDeposit'; // Import the new functi
 import { createTransferProposal } from './commands/createTransferProposal';
 import { PublicKey, Keypair, Connection } from '@solana/web3.js';
 import { readFileSync } from "fs";
-import {
-    appendTransactionMessageInstruction,
-    createTransactionMessage,
-    generateKeyPairSigner,
-    lamports,
-    pipe,
-    setTransactionMessageFeePayerSigner,
-    setTransactionMessageLifetimeUsingBlockhash,
-    signTransactionMessageWithSigners,
-    createKeyPairSignerFromBytes, TransactionSigner
-} from "@solana/kit";
 import path from "path";
 
 const cli = cac('fortisign');
@@ -101,20 +90,10 @@ cli
             }
             const multisigPubkey = new PublicKey(options.multisig);
 
-            // 3. Load Deposition Keypair
+
             const keypairPath = path.resolve(options.keypair);
-            console.log(chalk.gray(`Loading keypair from: ${keypairPath}`));
-
-            let depositor: TransactionSigner;
-            try {
-                const fileContent = readFileSync(keypairPath, "utf8");
-                const secretKey = Uint8Array.from(JSON.parse(fileContent));
-                depositor = await createKeyPairSignerFromBytes(secretKey);
-            } catch (e) {
-                throw new Error(`Failed to load keypair at ${keypairPath}. Ensure it is a valid Solana JSON keypair.`);
-            }
-
-            console.log(chalk.blue('Depositor:'), depositor.address);
+            const depositor = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(keypairPath, "utf8"))));
+            console.log(chalk.blue('Depositor:'), depositor.publicKey);
             console.log(chalk.blue('Amount (Lamports):'), amount);
 
             // 4. Call the Deposit Function
@@ -145,18 +124,9 @@ cli
                 throw new Error('Valid --amount (in lamports) is required');
             }
 
-            // 2. Load Signer Keypair
             const keypairPath = path.resolve(options.keypair);
-            console.log(chalk.gray(`Loading keypair from: ${keypairPath}`));
+            const signer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(keypairPath, "utf8"))));
 
-            let signer: Keypair;
-            try {
-                const fileContent = readFileSync(keypairPath, "utf8");
-                const secretKey = Uint8Array.from(JSON.parse(fileContent));
-                signer = Keypair.fromSecretKey(secretKey);
-            } catch (e) {
-                throw new Error(`Failed to load keypair at ${keypairPath}. Ensure it is a valid Solana JSON keypair.`);
-            }
 
             console.log(chalk.blue('Signer:'), signer.publicKey.toBase58());
             console.log(chalk.blue('Amount (Lamports):'), amount);
@@ -320,10 +290,6 @@ cli
             const member = Keypair.fromSecretKey(
                 Uint8Array.from(JSON.parse(readFileSync(keypairPath, 'utf8')))
             );
-
-            // 3. Setup Connection
-
-
             console.log(chalk.blue('Member:'), member.publicKey.toBase58());
             console.log(chalk.blue('Multisig:'), multisigPubkey.toBase58());
             console.log(chalk.blue('Proposal Number:'), proposalNumber.toString());

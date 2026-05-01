@@ -31,6 +31,7 @@ pub const LOOKUP_TABLE_META_SIZE: usize = 56;
 pub const TRANSACTION_HEADER_LEN: usize = 78;
 
 pub fn process_execute_proposal(accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    return Ok(());
     let [
         multisig,
         proposal,

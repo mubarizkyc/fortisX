@@ -8,7 +8,6 @@ import {
     serializeUtxo,
     deserializeUtxo
 } from "@cloak.dev/sdk-devnet";
-
 import { Connection, Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
 
@@ -52,7 +51,7 @@ export async function PrivateDeposit(
 
     // 5. Wait for indexing
     console.log("Waiting for chain indexing...");
-    await new Promise(r => setTimeout(r, 10000));
+    await new Promise(r => setTimeout(r, 1000));
 
     if (transferResult.outputUtxos.length > 0) {
         console.log("✅ Done. Note index:", transferResult.outputUtxos[0].index);

@@ -1,5 +1,5 @@
 import {
-    generateUtxoKeypair,
+    generateUtxoKeypair, bigintToBytes32
 } from '@cloak.dev/sdk-devnet'
 import { split } from 'shamir-secret-sharing'
 import path from 'path';
@@ -16,28 +16,10 @@ import {
     TransactionMessage,
     VersionedTransaction
 } from '@solana/web3.js'
-import {
-    appendTransactionMessageInstruction,
-    createTransactionMessage,
-    generateKeyPairSigner,
-    lamports,
-    pipe,
-    setTransactionMessageFeePayerSigner,
-    setTransactionMessageLifetimeUsingBlockhash,
-    signTransactionMessageWithSigners,
-    createKeyPairSignerFromBytes
-} from "@solana/kit";
-
-import { fromLegacyPublicKey, fromLegacyTransactionInstruction, fromVersionedTransaction } from "@solana/compat";
-import { LiteSVM, FailedTransactionMetadata } from "litesvm";
 import chalk from 'chalk';
 import { sign } from 'crypto';
-const PROGRAM_ID = new PublicKey('CD6Pnc1gpUQ1XT1bzXEPs2QnqFMcQUHsiRKAV9iYXh36')
-const TREASURY = new PublicKey('5wBH8hqU4PxVCFXmu3JR6Kegdy2Vq8K7fZnRgN5ZJEr2')
-const SEED_PREFIX = Buffer.from('multisig')
-const SEED_MULTISIG = Buffer.from('multisig')
 const SHARE_SIZE = 32 + 4 + 60 // member pubkey + len prefix + ciphertext
-
+import { SEED_MULTISIG, SEED_PREFIX, TREASURY, SEED_TRANSACTION, SEED_PROPOSAL, PROGRAM_ID, DISCRIMINATOR_APPROVE_PROPOSAL, PROPOSAL_HEADER_SIZE, bigIntToLittleEndianBytes } from '../utils';
 export class CreateMultisigIxData {
     discriminator: number        // 1 byte
     threshold: number            // 2 bytes
@@ -94,17 +76,6 @@ export class CreateMultisigIxData {
         ])
     }
 
-}
-
-// mirrors SDK's bigintToBytes
-function bigintToBytes32(value: bigint): Uint8Array {
-    const result = new Uint8Array(32)
-    let remaining = value
-    for (let i = 0; i < 32; i++) {
-        result[i] = Number(remaining & 255n)
-        remaining >>= 8n
-    }
-    return result
 }
 
 // encrypt a share with a member's ed25519 pubkey

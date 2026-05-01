@@ -13,138 +13,13 @@ import {
     MessageCompiledInstruction,
     VersionedTransaction
 } from '@solana/web3.js';
-import { CompiledKeys } from "./compiled-keys";
-import { transactionMessageBeet } from "./types";
+import { SEED_MULTISIG, SEED_PREFIX, TREASURY, transactionMessageToMultisigTransactionMessageBytes, SEED_VAULT, SEED_TRANSACTION, SEED_PROPOSAL, PROGRAM_ID, DISCRIMINATOR_APPROVE_PROPOSAL, PROPOSAL_HEADER_SIZE, bigIntToLittleEndianBytes } from '../utils';
+import { CompiledKeys } from '../utils';
+import { transactionMessageBeet } from '../types';
 import { Buffer } from 'buffer';
 import bs58 from 'bs58';
-import { LiteSVM, FailedTransactionMetadata } from "litesvm";
-// ⚠️ REPLACE WITH YOUR ACTUAL PROGRAM ID
-const PROGRAM_ID = new PublicKey('CD6Pnc1gpUQ1XT1bzXEPs2QnqFMcQUHsiRKAV9iYXh36');
-
-// Seeds must match your Rust code exactly
-const SEED_PREFIX = Buffer.from('multisig');
-const SEED_TRANSACTION = Buffer.from('transaction');
-const SEED_PROPOSAL = Buffer.from('proposal');
 import { readFileSync } from 'fs';
-import {
-    createKeyPairSignerFromBytes,
-    TransactionSigner,
-    pipe,
-    createTransactionMessage,
-    setTransactionMessageFeePayerSigner,
-    signTransactionMessageWithSigners,
-    appendTransactionMessageInstruction,
-    lamports,
-    none,
-} from '@solana/kit';
-import {
-    fromLegacyPublicKey,
-    fromLegacyTransactionInstruction,
-} from '@solana/compat';
 import chalk from 'chalk';
-
-export const SEED_MULTISIG = Buffer.from('multisig');
-export const SEED_VAULT = Buffer.from('vault');
-
-// Account size constants (from Rust)
-export const MULTISIG_HEADER_SIZE = 128; // Adjust if your header size differs
-export const PROPOSAL_HEADER_SIZE = 59;
-
-export function compileToWrappedMessageV0({
-    payerKey,
-    recentBlockhash,
-    instructions,
-    addressLookupTableAccounts,
-}: {
-    payerKey: PublicKey;
-    recentBlockhash: string;
-    instructions: TransactionInstruction[];
-    addressLookupTableAccounts?: AddressLookupTableAccount[];
-}) {
-    const compiledKeys = CompiledKeys.compile(instructions, payerKey);
-
-    const addressTableLookups = new Array<MessageAddressTableLookup>();
-    const accountKeysFromLookups: AccountKeysFromLookups = {
-        writable: [],
-        readonly: [],
-    };
-    const lookupTableAccounts = addressLookupTableAccounts || [];
-    for (const lookupTable of lookupTableAccounts) {
-        const extractResult = compiledKeys.extractTableLookup(lookupTable);
-        if (extractResult !== undefined) {
-            const [addressTableLookup, { writable, readonly }] = extractResult;
-            addressTableLookups.push(addressTableLookup);
-            accountKeysFromLookups.writable.push(...writable);
-            accountKeysFromLookups.readonly.push(...readonly);
-        }
-    }
-
-    const [header, staticAccountKeys] = compiledKeys.getMessageComponents();
-    const accountKeys = new MessageAccountKeys(
-        staticAccountKeys,
-        accountKeysFromLookups
-    );
-    const compiledInstructions = accountKeys.compileInstructions(instructions);
-    return new MessageV0({
-        header,
-        staticAccountKeys,
-        recentBlockhash,
-        compiledInstructions,
-        addressTableLookups,
-    });
-}
-export function transactionMessageToMultisigTransactionMessageBytes({
-    message,
-    addressLookupTableAccounts,
-}: {
-    message: TransactionMessage;
-    addressLookupTableAccounts?: AddressLookupTableAccount[];
-}): Uint8Array {
-    // // Make sure authority is marked as non-signer in all instructions,
-    // // otherwise the message will be serialized in incorrect format.
-    // message.instructions.forEach((instruction) => {
-    //   instruction.keys.forEach((key) => {
-    //     if (key.pubkey.equals(vaultPda)) {
-    //       key.isSigner = false;
-    //     }
-    //   });
-    // });
-
-    // Use custom implementation of `message.compileToV0Message` that allows instruction programIds
-    // to also be loaded from `addressLookupTableAccounts`.
-    const compiledMessage = compileToWrappedMessageV0({
-        payerKey: message.payerKey,
-        recentBlockhash: message.recentBlockhash,
-        instructions: message.instructions,
-        addressLookupTableAccounts,
-    });
-    // const compiledMessage = message.compileToV0Message(
-    //   addressLookupTableAccounts
-    // );
-
-    // We use custom serialization for `transaction_message` that ensures as small byte size as possible.
-    const [transactionMessageBytes] = transactionMessageBeet.serialize({
-        numSigners: compiledMessage.header.numRequiredSignatures,
-        numWritableSigners:
-            compiledMessage.header.numRequiredSignatures -
-            compiledMessage.header.numReadonlySignedAccounts,
-        numWritableNonSigners:
-            compiledMessage.staticAccountKeys.length -
-            compiledMessage.header.numRequiredSignatures -
-            compiledMessage.header.numReadonlyUnsignedAccounts,
-        accountKeys: compiledMessage.staticAccountKeys,
-        instructions: compiledMessage.compiledInstructions.map((ix) => {
-            return {
-                programIdIndex: ix.programIdIndex,
-                accountIndexes: ix.accountKeyIndexes,
-                data: Array.from(ix.data),
-            };
-        }),
-        addressTableLookups: compiledMessage.addressTableLookups,
-    });
-
-    return transactionMessageBytes;
-}
 export async function createTransferProposal(
     creatorKeypair: Keypair,
     multisigAddress: PublicKey,
@@ -169,7 +44,7 @@ export async function createTransferProposal(
     // 2. Derive PDAs using NEXT transaction index
     const nextTxIndexBytes = bigIntToLittleEndianBytes(nextTxIndex, 8);
 
-    const [vaultTransactionPda, vaultTxnBump] = PublicKey.findProgramAddressSync(
+    const [transactionPda, vaultTxnBump] = PublicKey.findProgramAddressSync(
         [
             SEED_PREFIX,
             multisigAddress.toBytes(),
@@ -190,14 +65,14 @@ export async function createTransferProposal(
         PROGRAM_ID
     );
 
-    const [, vaultBump] = PublicKey.findProgramAddressSync(
+    const [vaultPda, vaultBump] = PublicKey.findProgramAddressSync(
         [SEED_PREFIX, multisigAddress.toBytes(), SEED_VAULT],
         PROGRAM_ID
     );
 
     // 3. Build inner Transfer Transaction Message
     const transferIx = SystemProgram.transfer({
-        fromPubkey: vaultTransactionPda,
+        fromPubkey: vaultPda,
         toPubkey: transferTarget,
         lamports: Number(amountLamports),
     });
@@ -206,7 +81,7 @@ export async function createTransferProposal(
 
     const transferMessage = new TransactionMessage({
         instructions: [transferIx],
-        payerKey: vaultTransactionPda,
+        payerKey: creatorKeypair.publicKey,
         recentBlockhash: blockhash,
     });
 
@@ -236,7 +111,7 @@ export async function createTransferProposal(
         programId: PROGRAM_ID,
         keys: [
             { pubkey: multisigAddress, isSigner: false, isWritable: true },
-            { pubkey: vaultTransactionPda, isSigner: false, isWritable: true },
+            { pubkey: transactionPda, isSigner: false, isWritable: true },
             { pubkey: creatorKeypair.publicKey, isSigner: true, isWritable: true },
             { pubkey: proposalPda, isSigner: false, isWritable: true },
             { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -272,7 +147,7 @@ export async function createTransferProposal(
 
 
         console.log(chalk.green('✅ Proposal Created & Confirmed!'));
-        console.log('Vault PDA:', vaultTransactionPda.toBase58());
+        console.log('Vault PDA:', vaultPda.toBase58());
         console.log('Proposal PDA:', proposalPda.toBase58());
         console.log('Tx Index:', nextTxIndex.toString());
 
@@ -288,32 +163,5 @@ export async function createTransferProposal(
         }
 
         throw error;
-    }
-}
-
-
-
-// Helper: Convert bigint to little-endian byte array
-function bigIntToLittleEndianBytes(value: bigint, byteLength: number): Uint8Array {
-    const bytes = new Uint8Array(byteLength);
-    let remaining = value;
-    for (let i = 0; i < byteLength; i++) {
-        bytes[i] = Number(remaining & 0xFFn);
-        remaining >>= 8n;
-    }
-    return bytes;
-}
-
-// Helper: Read u64 LE from bytes
-class Uint64LE {
-    constructor(private bytes: Uint8Array) {
-        if (bytes.length !== 8) throw new Error('Uint64LE requires 8 bytes');
-    }
-    toBigInt(): bigint {
-        let result = 0n;
-        for (let i = 7; i >= 0; i--) {
-            result = (result << 8n) | BigInt(this.bytes[i]);
-        }
-        return result;
     }
 }
