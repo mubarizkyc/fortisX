@@ -29,3 +29,9 @@ pub struct ProposalHeader {
     /// PDA bump.
     pub bump: u8,
 }
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct PrivateTransferTransaction {
+    pub target: Pubkey,
+    pub amount: u64,
+}

@@ -49,10 +49,11 @@ pub fn process_create_proposal(accounts: &[AccountInfo], data: &[u8]) -> Program
     }
     //create an account for proposal
     let ephemeral_signers = data[0];
-    let proposal_type = data[1];
+    let proposal_type = 0;
     let voting_deadline = unsafe { *(data[2..10].as_ptr() as *const i64) };
     let tx_message_len = unsafe { *(data[10..14].as_ptr() as *const u32) as usize };
     let tx_message = &data[14..14 + tx_message_len];
+
     //update multisig transaction index;
 
     //updating wallet to current transaction index
@@ -153,7 +154,7 @@ pub fn process_create_proposal(accounts: &[AccountInfo], data: &[u8]) -> Program
         .copy_from_slice(&(0u32).to_le_bytes());
     // zero the approvers / members area
     proposal_data[PROPOSAL_HEADER_SIZE + 4..].fill(0);
-    // Write vault_transaction buffer safely and bounded
+
     unsafe {
         let data_ptr = vault_transaction.borrow_mut_data_unchecked().as_mut_ptr();
         //

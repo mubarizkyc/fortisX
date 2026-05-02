@@ -8,8 +8,10 @@ import {
     serializeUtxo,
     deserializeUtxo
 } from "@cloak.dev/sdk-devnet";
+import * as fs from "fs";
 import { Connection, Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
+import * as path from "path";
 
 export async function PrivateDeposit(
     depositAmount: bigint,
@@ -52,11 +54,23 @@ export async function PrivateDeposit(
     // 5. Wait for indexing
     console.log("Waiting for chain indexing...");
     await new Promise(r => setTimeout(r, 1000));
-
+    console.log(transferResult.outputUtxos[0]);
+    const bs58String = bs58.encode(serializeUtxo(transferResult.outputUtxos[0]));
     if (transferResult.outputUtxos.length > 0) {
         console.log("✅ Done. Note index:", transferResult.outputUtxos[0].index);
-        console.log("New Treasury Utxo (Base58):", bs58.encode(serializeUtxo(transferResult.outputUtxos[0])));
+        console.log("New Treasury Utxo (Base58):", bs58String);
     } else {
         console.warn("⚠️ Transaction sent but no output UTXOs found.");
+    }
+    // --- FILE WRITING LOGIC ---
+    try {
+        const logFileName = "multisig_utxo_logs.txt";
+        const filePath = path.join(process.cwd(), logFileName);
+        const dataToAppend = `${bs58String}\n`;
+        fs.appendFileSync(filePath, dataToAppend, { encoding: 'utf-8' });
+
+        console.log(`📝 UTXO appended to ${filePath}`);
+    } catch (err) {
+        console.error("❌ Failed to write UTXO to file:", err);
     }
 }

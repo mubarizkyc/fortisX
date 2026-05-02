@@ -46,7 +46,11 @@ fn process_instruction(
             instruction::process_account_close(accounts, instruction_data)?;
             Ok(())
         }
-
+        5 => {
+            sol_log("privateProposalCreate");
+            instruction::process_create_private_proposal(accounts, instruction_data)?;
+            Ok(())
+        }
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }

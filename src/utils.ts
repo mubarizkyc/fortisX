@@ -12,7 +12,7 @@ import {
     PublicKey,
     MessageV0, MessageAccountKeys
 } from "@solana/web3.js";
-import { VaultTransactionMessage, MessageAddressTableLookup, transactionMessageBeet } from "./types";
+import { VaultTransactionMessage, transactionMessageBeet } from "./types";
 import assert from "assert";
 import invariant from "invariant";
 export const TREASURY = new PublicKey('5wBH8hqU4PxVCFXmu3JR6Kegdy2Vq8K7fZnRgN5ZJEr2')
@@ -61,26 +61,6 @@ function getEphemeralSignerPda({
         PROGRAM_ID
     );
 }
-/*
-export type VaultTransactionMessage = {
-    numSigners: number
-    numWritableSigners: number
-    numWritableNonSigners: number
-    accountKeys: PublicKey[]
-    instructions: CompiledInstruction[]
-    addressTableLookups: MessageAddressTableLookup[]
-}
-export type CompiledInstruction = {
-    programIdIndex: number;
-    accountIndexes: Uint8Array;
-    data: Uint8Array;
-};
-export type MessageAddressTableLookup = {
-    accountKey: PublicKey;
-    writableIndexes: Uint8Array;
-    readonlyIndexes: Uint8Array;
-};
-*/
 export function toUtfBytes(str: string): Uint8Array {
     return new TextEncoder().encode(str);
 }
@@ -161,7 +141,6 @@ export async function accountsForTransactionExecute({
     messageBytes,
     ephemeralSignerBumps,
     programId,
-    addressLookupTableAccounts: localAddressLookupTableAccounts,
 }: {
     connection: Connection;
     messageBytes: Buffer<ArrayBuffer>;
@@ -169,12 +148,9 @@ export async function accountsForTransactionExecute({
     vaultPda: PublicKey;
     transactionPda: PublicKey;
     programId?: PublicKey;
-    addressLookupTableAccounts?: AddressLookupTableAccount[];
 }): Promise<{
     /** Account metas used in the `message`. */
     accountMetas: AccountMeta[];
-    /** Address lookup table accounts used in the `message`. */
-    lookupTableAccounts: AddressLookupTableAccount[];
 }> {
 
     const message = transactionMessageBeet.deserialize(messageBytes)[0];
@@ -189,37 +165,11 @@ export async function accountsForTransactionExecute({
         }
     );
     console.log("ephemeral signer PDAs", ephemeralSignerPdas.map((p) => p.toBase58()));
-    const addressLookupTableKeys = message.addressTableLookups.map(
-        ({ accountKey }) => accountKey
-    );
-    const addressLookupTableAccounts = new Map(
-        await Promise.all(
-            addressLookupTableKeys.map(async (key) => {
-                const keyBase58 = key.toBase58();
-                const localAccount = localAddressLookupTableAccounts?.find((a) => a.key.toBase58() === keyBase58)
-                if (localAccount) {
-                    return [keyBase58, localAccount] as const;
-                }
 
-                const { value } = await connection.getAddressLookupTable(key);
-                if (!value) {
-                    throw new Error(
-                        `Address lookup table account ${keyBase58} not found`
-                    );
-                }
-                return [keyBase58, value] as const;
-            })
-        )
-    );
 
     // Populate account metas required for execution of the transaction.
     const accountMetas: AccountMeta[] = [];
-    // First add the lookup table accounts used by the transaction. They are needed for on-chain validation.
-    accountMetas.push(
-        ...addressLookupTableKeys.map((key) => {
-            return { pubkey: key, isSigner: false, isWritable: false };
-        })
-    );
+
 
     // Then add static account keys included into the message.
     for (const [accountIndex, accountKey] of message.accountKeys.entries()) {
@@ -236,49 +186,9 @@ export async function accountsForTransactionExecute({
         });
     }
     // Then add accounts that will be loaded with address lookup tables.
-    for (const lookup of message.addressTableLookups) {
-
-        const lookupTableAccount = addressLookupTableAccounts.get(
-            lookup.accountKey.toBase58()
-        );
-        if (!lookupTableAccount) {
-            throw new Error(
-                `Address lookup table account ${lookup.accountKey.toBase58()} not found`
-            );
-        }
-        for (const accountIndex of lookup.writableIndexes) {
-            const pubkey: PublicKey =
-                lookupTableAccount.state.addresses[accountIndex];
-            invariant(
-                pubkey,
-                `Address lookup table account ${lookup.accountKey.toBase58()} does not contain address at index ${accountIndex}`
-            );
-            accountMetas.push({
-                pubkey,
-                isWritable: true,
-                // Accounts in address lookup tables can not be signers.
-                isSigner: false,
-            });
-        }
-        for (const accountIndex of lookup.readonlyIndexes) {
-            const pubkey: PublicKey =
-                lookupTableAccount.state.addresses[accountIndex];
-            invariant(
-                pubkey,
-                `Address lookup table account ${lookup.accountKey.toBase58()} does not contain address at index ${accountIndex}`
-            );
-            accountMetas.push({
-                pubkey,
-                isWritable: false,
-                // Accounts in address lookup tables can not be signers.
-                isSigner: false,
-            });
-        }
-    }
 
     return {
-        accountMetas,
-        lookupTableAccounts: [...addressLookupTableAccounts.values()],
+        accountMetas
     };
 }
 
@@ -391,39 +301,6 @@ export class CompiledKeys {
         return [header, staticAccountKeys];
     }
 
-    extractTableLookup(
-        lookupTable: AddressLookupTableAccount
-    ): [MessageAddressTableLookup, AccountKeysFromLookups] | undefined {
-        const [writableIndexes, drainedWritableKeys] =
-            this.drainKeysFoundInLookupTable(
-                lookupTable.state.addresses,
-                (keyMeta) =>
-                    !keyMeta.isSigner && !keyMeta.isInvoked && keyMeta.isWritable
-            );
-        const [readonlyIndexes, drainedReadonlyKeys] =
-            this.drainKeysFoundInLookupTable(
-                lookupTable.state.addresses,
-                (keyMeta) =>
-                    !keyMeta.isSigner && !keyMeta.isInvoked && !keyMeta.isWritable
-            );
-
-        // Don't extract lookup if no keys were found
-        if (writableIndexes.length === 0 && readonlyIndexes.length === 0) {
-            return;
-        }
-
-        return [
-            {
-                accountKey: lookupTable.key,
-                writableIndexes,
-                readonlyIndexes,
-            },
-            {
-                writable: drainedWritableKeys,
-                readonly: drainedReadonlyKeys,
-            },
-        ];
-    }
 
     /** @internal */
     private drainKeysFoundInLookupTable(
@@ -455,30 +332,17 @@ export function compileToWrappedMessageV0({
     payerKey,
     recentBlockhash,
     instructions,
-    addressLookupTableAccounts,
 }: {
     payerKey: PublicKey;
     recentBlockhash: string;
     instructions: TransactionInstruction[];
-    addressLookupTableAccounts?: AddressLookupTableAccount[];
 }) {
     const compiledKeys = CompiledKeys.compile(instructions, payerKey);
-
-    const addressTableLookups = new Array<MessageAddressTableLookup>();
     const accountKeysFromLookups: AccountKeysFromLookups = {
         writable: [],
         readonly: [],
     };
-    const lookupTableAccounts = addressLookupTableAccounts || [];
-    for (const lookupTable of lookupTableAccounts) {
-        const extractResult = compiledKeys.extractTableLookup(lookupTable);
-        if (extractResult !== undefined) {
-            const [addressTableLookup, { writable, readonly }] = extractResult;
-            addressTableLookups.push(addressTableLookup);
-            accountKeysFromLookups.writable.push(...writable);
-            accountKeysFromLookups.readonly.push(...readonly);
-        }
-    }
+
 
     const [header, staticAccountKeys] = compiledKeys.getMessageComponents();
     const accountKeys = new MessageAccountKeys(
@@ -491,15 +355,13 @@ export function compileToWrappedMessageV0({
         staticAccountKeys,
         recentBlockhash,
         compiledInstructions,
-        addressTableLookups,
+        addressTableLookups: [],
     });
 }
 export function transactionMessageToMultisigTransactionMessageBytes({
     message,
-    addressLookupTableAccounts,
 }: {
     message: TransactionMessage;
-    addressLookupTableAccounts?: AddressLookupTableAccount[];
 }): Uint8Array {
     // // Make sure authority is marked as non-signer in all instructions,
     // // otherwise the message will be serialized in incorrect format.
@@ -517,7 +379,6 @@ export function transactionMessageToMultisigTransactionMessageBytes({
         payerKey: message.payerKey,
         recentBlockhash: message.recentBlockhash,
         instructions: message.instructions,
-        addressLookupTableAccounts,
     });
     // const compiledMessage = message.compileToV0Message(
     //   addressLookupTableAccounts
@@ -541,7 +402,6 @@ export function transactionMessageToMultisigTransactionMessageBytes({
                 data: Array.from(ix.data),
             };
         }),
-        addressTableLookups: compiledMessage.addressTableLookups,
     });
 
     return transactionMessageBytes;

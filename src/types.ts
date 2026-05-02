@@ -91,24 +91,6 @@ export function smallArray<T, V = Partial<T>>(
         description: `smallArray`,
     };
 }
-export type MessageAddressTableLookup = {
-    /** Address lookup table account key */
-    accountKey: PublicKey;
-    /** List of indexes used to load writable account addresses */
-    writableIndexes: number[];
-    /** List of indexes used to load readonly account addresses */
-    readonlyIndexes: number[];
-};
-
-export const messageAddressTableLookupBeet =
-    new beet.FixableBeetArgsStruct<MessageAddressTableLookup>(
-        [
-            ["accountKey", beetSolana.publicKey],
-            ["writableIndexes", smallArray(beet.u8, beet.u8)],
-            ["readonlyIndexes", smallArray(beet.u8, beet.u8)],
-        ],
-        "MessageAddressTableLookup"
-    );
 
 
 export type CompiledMsInstruction = {
@@ -132,7 +114,6 @@ export type VaultTransactionMessage = {
     numWritableNonSigners: number;
     accountKeys: PublicKey[];
     instructions: CompiledMsInstruction[];
-    addressTableLookups: MessageAddressTableLookup[];
 };
 
 export const transactionMessageBeet =
@@ -143,10 +124,6 @@ export const transactionMessageBeet =
             ["numWritableNonSigners", beet.u8],
             ["accountKeys", smallArray(beet.u8, beetSolana.publicKey)],
             ["instructions", smallArray(beet.u8, compiledMsInstructionBeet)],
-            [
-                "addressTableLookups",
-                smallArray(beet.u8, messageAddressTableLookupBeet),
-            ],
         ],
         "VaultTransactionMessage"
     );
