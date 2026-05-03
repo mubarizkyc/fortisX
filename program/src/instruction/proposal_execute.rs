@@ -111,6 +111,13 @@ pub fn process_execute_proposal(accounts: &[AccountInfo], data: &[u8]) -> Progra
         sol_log("invalid proposal status");
         return Err(ProgramError::InvalidAccountData);
     }
+    if proposal_state.proposal_type == 1 {
+        //private proposal dosnet needs on chain execution, so we can directly mark it as executed without executing any transaction
+        // Mark the proposal as executed.
+        proposal_state.status = 2; //executed;
+        proposal_state.timestamp = Clock::get()?.unix_timestamp;
+        return Ok(());
+    }
 
     // Parse ephemeral signer bumps from the transaction data
     let ephemeral_signers_bump_count = transaction_data[74] as usize;

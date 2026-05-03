@@ -73,7 +73,7 @@ export async function executeProposal(
     console.log("vault pda", vaultPda.toBase58());
     console.log("proposal pda", ProposalPda.toBase58());
     console.log("transaction pda", txPda.toBase58());
-    const { accountMetas, lookupTableAccounts } = await accountsForTransactionExecute({
+    const { accountMetas } = await accountsForTransactionExecute({
         connection,
         messageBytes,
         ephemeralSignerBumps: [...ephemeralSignerBumps],

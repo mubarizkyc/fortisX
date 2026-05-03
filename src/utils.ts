@@ -32,13 +32,23 @@ export const DISCRIMINATOR_EXECUTE_PROPOSAL = 3; // Adjust to match your Rust en
 export const DISCRIMINATOR_APPROVE_PROPOSAL = 2; // Adjust to match your Rust enum
 const SEED_EPHEMERAL_SIGNER = toUtfBytes("ephemeral_signer");
 // Helper: Convert bigint to little-endian byte array
+/**
+ * Convert bigint to little-endian byte array (LSB at index 0)
+ */
 export function bigIntToLittleEndianBytes(value: bigint, byteLength: number): Uint8Array {
     const bytes = new Uint8Array(byteLength);
     let remaining = value;
+
     for (let i = 0; i < byteLength; i++) {
-        bytes[i] = Number(remaining & 0xFFn);
-        remaining >>= 8n;
+        bytes[i] = Number(remaining & 0xFFn); // Extract LSB
+        remaining >>= 8n; // Shift right by 8 bits
     }
+
+    // Optional: warn if value doesn't fit in byteLength
+    if (remaining !== 0n) {
+        console.warn(`⚠️ bigintToLittleEndianBytes: value exceeds ${byteLength} bytes, truncating`);
+    }
+
     return bytes;
 }
 function getEphemeralSignerPda({

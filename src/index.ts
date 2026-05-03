@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import cac from 'cac';
 import chalk from 'chalk';
+import { request, Agent } from 'undici';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
+import { executePrivateProposal } from './commands/executePrivateProposal';
 
 // Import all command functions
 import { createMultisig } from './commands/createMultisig';
@@ -14,6 +16,11 @@ import { createTransferProposal } from './commands/createTransferProposal';
 import { approveProposal } from './commands/approveProposal';
 import { executeProposal } from './commands/executeProposal';
 import { createPrivateTransferProposal } from './commands/createPrivateTransferProposal.ts';
+import { fetchAndDecryptShare } from './shareCrypto';
+function rawArg(flag: string): string | undefined {
+    const idx = process.argv.indexOf(flag)
+    return idx !== -1 ? process.argv[idx + 1] : undefined
+}
 
 // ────────────────────────────────────────────────────────────
 // Helpers
@@ -22,8 +29,27 @@ import { createPrivateTransferProposal } from './commands/createPrivateTransferP
 /**
  * Safe BigInt parsing: handles decimal, hex (0x...), and trailing 'n'
  */
-function parseBigInt(value: string): bigint {
-    const cleaned = value.trim().replace(/^0x/, '').replace(/n$/, '');
+/**
+ * Safe BigInt parsing: handles decimal, hex (0x...), trailing 'n', or already-parsed values
+ */
+function parseBigInt(value: string | number | bigint): bigint {
+    // If already a bigint, return as-is
+    if (typeof value === 'bigint') return value;
+
+    // If a number, warn about precision loss (shouldn't happen with {type: String})
+    if (typeof value === 'number') {
+        console.warn('⚠️ Warning: value was parsed as Number - may lose precision');
+        return BigInt(Math.round(value));
+    }
+
+    // Handle string input
+    const cleaned = String(value).trim().replace(/^0x/, '').replace(/n$/, '');
+
+    // Validate it's not empty
+    if (!cleaned) {
+        throw new Error('Cannot parse empty value as BigInt');
+    }
+
     return BigInt(cleaned);
 }
 
@@ -64,7 +90,153 @@ function getDevnetConnection(): Connection {
 // ────────────────────────────────────────────────────────────
 
 const cli = cac('fortisign');
+// ────────────────────────────────────────────────────────────
+// CLI Command: submit_share
+// ────────────────────────────────────────────────────────────
+cli
+    .command('submit_share', 'Fetch, decrypt, and submit your Shamir share to the collector')
+    .option('--keypair <path>', 'Path to YOUR member keypair JSON (for decryption)', {
+        default: '/home/mubariz/.config/solana/id.json'
+    })
+    .option('--multisig <address>', 'Multisig account address (base58)')
+    .option('--collector-url <url>', 'Share collector endpoint', {
+        default: 'https://localhost:3456/api/submit-share'
+    })
+    .option('--insecure', 'Allow self-signed HTTPS certificates (for local testing)', { default: false })
+    .option('--timeout <ms>', 'Request timeout in milliseconds', { type: Number, default: 30000 })
+    .action(async (options) => {
+        try {
+            // 1. Validate inputs
+            if (!options.multisig) throw new Error('--multisig <address> is required');
+            if (!options.keypair) throw new Error('--keypair <path> is required');
 
+            const multisigAddress = new PublicKey(options.multisig);
+            const memberKeypair = loadKeypair(options.keypair);
+            const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+
+            console.log(chalk.blue('Member:'), memberKeypair.publicKey.toBase58());
+            console.log(chalk.blue('Multisig:'), multisigAddress.toBase58());
+            console.log(chalk.blue('Collector URL:'), options.collectorUrl);
+            console.log(chalk.yellow('🔐 Fetching encrypted share from on-chain...'));
+
+            // 2. Fetch and decrypt share
+            const decryptedShare = await fetchAndDecryptShare(
+                multisigAddress,
+                memberKeypair,
+                connection
+            );
+
+            console.log(chalk.green('✅ Share decrypted successfully'));
+            console.log('Decrypted share (first 8 bytes, hex):',
+                Buffer.from(decryptedShare.slice(0, 8)).toString('hex') + '...');
+
+            // 3. Submit to collector server using undici (supports custom TLS)
+            console.log(chalk.yellow('📤 Submitting share to collector...'));
+
+            const requestBody = JSON.stringify({
+                memberPubkey: memberKeypair.publicKey.toBase58(),
+                decryptedShare: Array.from(decryptedShare),
+                timestamp: Date.now(),
+            });
+
+            // Configure dispatcher for insecure connections if needed
+            const dispatcher = options.insecure
+                ? new Agent({
+                    connect: {
+                        rejectUnauthorized: false, // Skip TLS verification for local testing
+                    },
+                })
+                : undefined;
+
+            const { statusCode, body } = await request(options.collectorUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(requestBody).toString(),
+                },
+                body: requestBody,
+                dispatcher, // Apply custom agent if --insecure flag is set
+                signal: AbortSignal.timeout(options.timeout),
+            });
+
+            const responseText = await body.text();
+
+            if (statusCode !== 200) {
+                throw new Error(`Collector returned ${statusCode}: ${responseText}`);
+            }
+
+            const result = JSON.parse(responseText);
+            console.log(chalk.green('✅ Share submitted successfully!'));
+            console.log('Response:', result);
+
+            if (result.collected >= result.threshold) {
+                console.log(chalk.green('🎉 Threshold reached! Execution can proceed.'));
+            } else {
+                console.log(chalk.blue(`📊 Progress: ${result.collected}/${result.threshold} shares collected`));
+            }
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Share submission failed:'), error.message);
+
+            if (error.code === 'ECONNREFUSED') {
+                console.error('💡 Is the share collector server running?');
+                console.error('💡 Try: npx tsx src/index.ts execute_private_proposal ... (in another terminal)');
+            } else if (error.code === 'ERR_TLS_CERT_ALTNAME_INVALID' || error.code === 'DEPTH_ZERO_SELF_SIGNED_CERT') {
+                console.error('💡 TLS certificate error. Ensure --insecure flag is set for self-signed certs.');
+            } else if (error.name === 'TimeoutError' || error.message?.includes('timeout')) {
+                console.error('💡 Request timed out. Increase --timeout or check network connectivity.');
+            }
+
+            process.exit(1);
+        }
+    });
+cli
+    .command('execute_private_proposal', 'Execute an approved private Cloak proposal')
+    .option('--keypair <path>', 'Path to executing member keypair JSON', {
+        default: '/home/mubariz/.config/solana/id.json'
+    })
+    .option('--multisig <address>', 'Multisig account address (base58)')
+    // ✅ FIX: Explicitly set type to String to prevent auto-coercion to Number
+    .option('--proposal-number <value>', 'Proposal number to execute (decimal or 0x hex)', { type: String })
+    .option('--port <number>', 'Port for share collector HTTPS server', { type: Number, default: 3456 })
+    .option('--timeout <ms>', 'Timeout for share collection in milliseconds', { type: Number, default: 120000 })
+    .option('--dao-db <path>', 'Path to local DAO UTXO database JSON', { default: './dao_utxo_db.json' })
+    .option('--https-cert <path>', 'Path to HTTPS certificate (optional, for production)')
+    .option('--https-key <path>', 'Path to HTTPS private key (optional, for production)')
+    .action(async (options) => {
+
+
+        try {
+
+            // Other options can still use cac parsing
+            const multisig = new PublicKey(options.multisig);
+            const creator = loadKeypair(options.keypair);
+            const proposalNumber = parseBigInt(options.proposalNumber);
+
+            console.log(chalk.blue('Creator:'), creator.publicKey.toBase58());
+            console.log(chalk.blue('Multisig:'), multisig.toBase58());
+            console.log(chalk.yellow('⏳ executing private transfer proposal...'));
+
+            // 5. Execute the proposal
+            await executePrivateProposal(
+                creator,
+                multisig,
+                proposalNumber,
+                {
+                    shareCollectorPort: options.port,
+                    shareTimeoutMs: options.timeout,
+                    daoDbPath: options.daoDb,
+                    shareCollectorCert: options.httpsCert,
+                    shareCollectorKey: options.httpsKey,
+                }
+            );
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Error:'), error.message);
+            process.exit(1);
+        }
+
+    });
 // --- create_multisig ---
 cli
     .command('create_multisig', 'Create a new multisig configuration')
@@ -278,24 +450,35 @@ cli
 cli
     .command('create_private_transfer_proposal', 'Create a private Cloak transfer proposal')
     .option('--keypair <path>', 'Path to creator keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
-    .option('--multisig <address>', 'Multisig account address')
-    .option('--commitment <value>', 'UTXO commitment (decimal or 0x hex)')
+    .option('--multisig <address>', 'Multisig account address (base58)')
+    // ✅ FIX: Force string type to preserve full precision
+    .option('--commitment <value>', 'UTXO commitment (decimal or 0x hex)', { type: String })
     .option('--target <value>', 'Recipient public key (base58 or bigint)')
-    .option('--amount <value>', 'Amount in lamports')
+    .option('--amount <value>', 'Amount in lamports', { type: String })
     .action(async (options) => {
         try {
-            // Parse BigInt-safe inputs
-            const commitment = parseBigInt(options.commitment);
-            const amountLamports = parseBigInt(options.amount);
-            const multisig = new PublicKey(options.multisig);
-            const recipient = parsePublicKey(options.target);
-            const creator = loadKeypair(options.keypair);
-            const connection = getDevnetConnection();
+
+            // ✅ read directly from process.argv — never touched by CLI framework
+            const commitmentStr = rawArg('--commitment')
+            const amountStr = rawArg('--amount')
+
+            if (!commitmentStr) throw new Error('--commitment is required')
+            if (!amountStr) throw new Error('--amount is required')
+
+            // now safe — these are raw strings
+            const commitment = BigInt(commitmentStr)
+            const amount = BigInt(amountStr)
+
+            // these are fine as-is — pubkeys are strings, no precision issue
+            const multisig = new PublicKey(options.multisig)
+            const recipient = new PublicKey(options.target)
+            const creator = loadKeypair(options.keypair)
+
 
             console.log(chalk.blue('Creator:'), creator.publicKey.toBase58());
             console.log(chalk.blue('Multisig:'), multisig.toBase58());
             console.log(chalk.blue('Recipient:'), recipient.toBase58());
-            console.log(chalk.blue('Amount:'), amountLamports.toString(), 'lamports');
+            console.log(chalk.blue('Amount:'), amount.toString(), 'lamports');
             console.log(chalk.blue('Commitment:'), '0x' + commitment.toString(16).slice(0, 16) + '...');
             console.log(chalk.yellow('⏳ Creating private transfer proposal...'));
 
@@ -304,8 +487,8 @@ cli
                 creator,
                 multisig,
                 recipient,
-                amountLamports,
-                connection
+                amount,
+
             );
 
             console.log(chalk.green('✅ Private Proposal Created!'));
