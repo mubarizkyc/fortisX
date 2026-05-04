@@ -190,52 +190,77 @@ cli
             process.exit(1);
         }
     });
+// ────────────────────────────────────────────────────────────
+// CLI Command: execute_private_proposal (Simplified)
+// ────────────────────────────────────────────────────────────
 cli
     .command('execute_private_proposal', 'Execute an approved private Cloak proposal')
     .option('--keypair <path>', 'Path to executing member keypair JSON', {
         default: '/home/mubariz/.config/solana/id.json'
     })
     .option('--multisig <address>', 'Multisig account address (base58)')
-    // ✅ FIX: Explicitly set type to String to prevent auto-coercion to Number
+    // ✅ FIX: Force string type to prevent Number coercion for BigInt
     .option('--proposal-number <value>', 'Proposal number to execute (decimal or 0x hex)', { type: String })
-    .option('--port <number>', 'Port for share collector HTTPS server', { type: Number, default: 3456 })
-    .option('--timeout <ms>', 'Timeout for share collection in milliseconds', { type: Number, default: 120000 })
-    .option('--dao-db <path>', 'Path to local DAO UTXO database JSON', { default: './dao_utxo_db.json' })
-    .option('--https-cert <path>', 'Path to HTTPS certificate (optional, for production)')
-    .option('--https-key <path>', 'Path to HTTPS private key (optional, for production)')
+    // ✅ UTXO file option (one Base58-encoded UTXO per line)
+    .option('--utxo-file <path>', 'Path to file with Base58 UTXOs (one per line)', {
+        default: './multisig_utxo_logs.txt'
+    })
+    // Optional: DAO DB for blinding factor lookup (if not in UTXO file)
+    .option('--dao-db <path>', 'Path to local DAO UTXO database JSON', {
+        default: './dao_utxo_db.json'
+    })
+    // Optional: Override hardcoded treasury private key for testing
+    .option('--treasury-key <value>', 'Treasury private key (bigint, for testing)', { type: String })
+    // Optional: Cloak program ID override
+    .option('--cloak-program <address>', 'Cloak program ID (base58)')
     .action(async (options) => {
-
-
         try {
+            // 1. Validate required inputs
+            if (!options.multisig) throw new Error('--multisig <address> is required');
+            if (!options.proposalNumber) throw new Error('--proposal-number <value> is required');
 
-            // Other options can still use cac parsing
+            // 2. Parse inputs safely
             const multisig = new PublicKey(options.multisig);
-            const creator = loadKeypair(options.keypair);
             const proposalNumber = parseBigInt(options.proposalNumber);
+            const creator = loadKeypair(options.keypair);
 
-            console.log(chalk.blue('Creator:'), creator.publicKey.toBase58());
+            // Optional: parse treasury private key if provided
+            const treasuryPrivateKey = options.treasuryKey
+                ? parseBigInt(options.treasuryKey)
+                : undefined;
+
+            // Optional: parse Cloak program ID if provided
+            const cloakProgramId = options.cloakProgram
+                ? new PublicKey(options.cloakProgram)
+                : undefined;
+
+            console.log(chalk.blue('Executing Member:'), creator.publicKey.toBase58());
             console.log(chalk.blue('Multisig:'), multisig.toBase58());
-            console.log(chalk.yellow('⏳ executing private transfer proposal...'));
+            console.log(chalk.blue('Proposal Number:'), proposalNumber.toString());
+            console.log(chalk.blue('UTXO File:'), options.utxoFile);
+            console.log(chalk.yellow('⏳ Executing private transfer proposal...'));
 
-            // 5. Execute the proposal
-            await executePrivateProposal(
+            // 3. Execute the proposal with simplified flow
+            const result = await executePrivateProposal(
                 creator,
                 multisig,
                 proposalNumber,
                 {
-                    shareCollectorPort: options.port,
-                    shareTimeoutMs: options.timeout,
-                    daoDbPath: options.daoDb,
-                    shareCollectorCert: options.httpsCert,
-                    shareCollectorKey: options.httpsKey,
+                    treasuryPrivateKey, // undefined = use hardcoded default
+                    cloakProgramId,
                 }
             );
 
         } catch (error: any) {
-            console.error(chalk.red('❌ Error:'), error.message);
+            console.error(chalk.red('❌ Execution Failed:'), error.message);
+
+            if (error.logs && Array.isArray(error.logs)) {
+                console.error('📜 Program Logs:');
+                error.logs.forEach((log: string) => console.error('  ', log));
+            }
+
             process.exit(1);
         }
-
     });
 // --- create_multisig ---
 cli
@@ -336,20 +361,23 @@ cli
     .option('--utxo <base58>', 'Your existing Private UTXO (Base58) to spend')
     .action(async (options) => {
         try {
+            const treasuryidStr = rawArg('--treasury-id');
+            if (!treasuryidStr) throw new Error('--treasury-id <bigint> is required');
+            const treasuryid = BigInt(treasuryidStr)
             const amount = options.amount;
             if (!amount || amount <= 0) throw new Error('Valid --amount is required');
-            if (!options.treasuryId) throw new Error('--treasury-id <bigint> is required');
+
             if (!options.utxo) throw new Error('--utxo <base58> is required');
 
-            const treasuryId = parseBigInt(options.treasuryId);
+
             const signer = loadKeypair(options.keypair);
 
             console.log(chalk.blue('Signer:'), signer.publicKey.toBase58());
-            console.log(chalk.blue('Treasury ID:'), treasuryId.toString());
+            console.log(chalk.blue('Treasury ID:'), treasuryid.toString());
             console.log(chalk.blue('Amount:'), amount, 'lamports');
             console.log(chalk.yellow('⏳ Processing private transfer...'));
 
-            await PrivateDeposit(BigInt(amount), signer, treasuryId, options.utxo);
+            await PrivateDeposit(BigInt(amount), signer, treasuryid, options.utxo);
             console.log(chalk.green('✅ Private Transfer Completed!'));
 
         } catch (error: any) {

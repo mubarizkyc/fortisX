@@ -1,5 +1,5 @@
 import {
-    generateUtxoKeypair, bigintToBytes32
+    generateUtxoKeypair
 } from '@cloak.dev/sdk-devnet'
 import { split } from 'shamir-secret-sharing'
 import path from 'path';
@@ -168,20 +168,14 @@ function encryptShareForMember(
 }
 
 
-// ─── bytes32ToBigint (fixed) ──────────────────────────────
 export function bytes32ToBigint(bytes: Uint8Array): bigint {
-    // bigintToBytes32 writes LSB at index 0 (little-endian)
-    // so we read index 0 as least significant
-    if (bytes.length !== 32) {
-        throw new Error(`Expected 32 bytes, got ${bytes.length}`)
-    }
+    if (bytes.length !== 32) throw new Error(`Expected 32 bytes, got ${bytes.length}`)
     let result = 0n
     for (let i = 31; i >= 0; i--) {
         result = (result << 8n) | BigInt(bytes[i])
     }
     return result
 }
-
 
 export async function createMultisig(
     members: PublicKey[],
@@ -201,7 +195,7 @@ export async function createMultisig(
     console.log(chalk.blue('Generated treasury UTXO keypair with public key:'), treasuryKp.publicKey);
     //display private key 
     console.log('Treasury Private Key (bigint):', treasuryKp.privateKey);
-    const treasuryPkBytes = bigintToBytes32(treasuryKp.privateKey);
+    const treasuryPkBytes = bigIntToLittleEndianBytes(treasuryKp.privateKey, 32);
     console.log("Treasury Private Key", treasuryKp.privateKey);
 
     const treasuryPkBytesBE = new Uint8Array(treasuryPkBytes).reverse();
@@ -247,7 +241,7 @@ export async function createMultisig(
         rentCollector,
         members,
         encryptedShares,
-        treasuryUtxoPubkey: bigintToBytes32(treasuryKp.publicKey),
+        treasuryUtxoPubkey: bigIntToLittleEndianBytes(treasuryKp.publicKey, 32),
     });
 
     console.log(chalk.blue('Instruction data size:'), ixData.serialize().byteLength, 'bytes');

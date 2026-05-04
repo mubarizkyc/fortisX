@@ -23,9 +23,7 @@ export async function CloakDeposit(
 ) {
     const connection = new Connection("https://api.devnet.solana.com", "confirmed");
 
-    const skSpend = signer.secretKey.slice(0, 32);
-    const utxoKeypair = await deriveUtxoKeypairFromSpendKey(skSpend);
-    const viewingKeyNk = getNkFromUtxoPrivateKey(utxoKeypair.privateKey);
+    const utxoKeypair = await generateUtxoKeypair();
 
     // 2. Create the output UTXO structure
     const output = await createUtxo(depositAmount, utxoKeypair, NATIVE_SOL_MINT);
@@ -43,11 +41,11 @@ export async function CloakDeposit(
         depositorKeypair: signer,
         walletPublicKey: signer.publicKey,
         enforceViewingKeyRegistration: false,
-        chainNoteViewingKeyNk: viewingKeyNk, // Helps SDK construct proofs
     });
 
     // 4. Verify the note was created
     const myNote = depositResult.outputUtxos.find(u => u.amount > 0n);
+    console.log("utxo: ", myNote);
 
     // Wait for indexing/leaf settlement
     console.log("Waiting for chain indexing...");
