@@ -6,7 +6,7 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { executePrivateProposal } from './commands/executePrivateProposal';
-
+import { ScanComplianceOptions, scanCompliance } from './commands/viewComplianceReport';
 // Import all command functions
 import { createMultisig } from './commands/createMultisig';
 import { publicDeposit } from './commands/publicDeposit';
@@ -530,7 +530,49 @@ cli
             process.exit(1);
         }
     });
+cli
+    .command('scan-compliance', 'Scan Cloak transaction history for compliance/auditing')
+    .option('--viewing-key <key>', 'Base58-encoded viewing key (nk, 32 bytes)', { required: true })
+    .option('--rpc <url>', 'Solana RPC URL', { default: 'https://devnet.helius-rpc.com/?api-key=64096058-650d-4e15-99cd-842c236765ef' })
+    .option('--limit <number>', 'Maximum transactions to scan', { type: Number })
+    .action(async (options) => {
+        try {
+            console.log(chalk.yellow('🔐 FortisX Compliance Scanner'));
+            console.log(chalk.dim('Scanning private Cloak transactions...'));
+            console.log();
 
+            // Build options object matching ScanComplianceOptions interface
+            const scanOptions: ScanComplianceOptions = {
+                viewingKey: options.viewingKey,
+                rpcUrl: options.rpc,
+                limit: options.limit,
+            };
+
+            // Execute scan
+            const result = await scanCompliance(scanOptions);
+
+            // Success exit
+            console.log(chalk.green('\n✨ Done.'));
+            process.exit(0);
+
+        } catch (error: any) {
+            console.error(chalk.red('\n❌ Scan failed.'));
+
+            // Provide helpful hints for common issues
+            if (error.message?.includes('32 bytes')) {
+                console.error('💡 Viewing key (nk) must be exactly 32 bytes.');
+                console.error('💡 Generate with: getNkFromUtxoPrivateKey(utxoPrivateKey)');
+            } else if (error.message?.includes('base58')) {
+                console.error('💡 Viewing key must be valid base58 encoding.');
+            } else if (error.message?.includes('not found')) {
+                console.error('💡 Check your --rpc URL and --program-id.');
+            } else if (error.message?.includes('timeout')) {
+                console.error('💡 RPC request timed out. Try a different endpoint or increase timeout.');
+            }
+
+            process.exit(1);
+        }
+    });
 // ────────────────────────────────────────────────────────────
 // Help & Version
 // ────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import {
-    generateUtxoKeypair
+    generateUtxoKeypair, getNkFromUtxoPrivateKey
 } from '@cloak.dev/sdk-devnet'
 import { split } from 'shamir-secret-sharing'
 import path from 'path';
@@ -16,6 +16,7 @@ import {
     TransactionMessage,
     VersionedTransaction
 } from '@solana/web3.js'
+import bs58 from "bs58";
 import chalk from 'chalk';
 import { sign } from 'crypto';
 import { SEED_MULTISIG, SEED_PREFIX, TREASURY, SEED_TRANSACTION, SEED_PROPOSAL, PROGRAM_ID, DISCRIMINATOR_APPROVE_PROPOSAL, PROPOSAL_HEADER_SIZE, bigIntToLittleEndianBytes } from '../utils';
@@ -192,6 +193,10 @@ export async function createMultisig(
 
     // 1. Generate treasury UTXO keypair
     const treasuryKp = await generateUtxoKeypair();
+    const viewingKeyNk = getNkFromUtxoPrivateKey(treasuryKp.privateKey);
+    console.log("view key raw: ", viewingKeyNk);
+    //print viewing key
+    console.log("viewing key: ", bs58.encode(viewingKeyNk))
     console.log(chalk.blue('Generated treasury UTXO keypair with public key:'), treasuryKp.publicKey);
     //display private key 
     console.log('Treasury Private Key (bigint):', treasuryKp.privateKey);

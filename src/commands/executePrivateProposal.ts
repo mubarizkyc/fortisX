@@ -13,7 +13,8 @@ import {
     createUtxo,
     deserializeUtxo,
     Utxo,
-    fullWithdraw, computeUtxoCommitment, derivePublicKey
+    fullWithdraw, computeUtxoCommitment, derivePublicKey,
+    getNkFromUtxoPrivateKey
 } from '@cloak.dev/sdk-devnet';
 
 // Local utils
@@ -50,7 +51,7 @@ export async function executePrivateProposal(
     const {
         utxoFilePath = './treasury_utxos.json',
         // 🔐 HARDCODED TREASURY PRIVATE KEY (replace with Shamir later)
-        treasuryPrivateKey = 307056467906366067893145655724826023861939096429627051233140052300132426955n,
+        treasuryPrivateKey = 128214697256517353241348161994041802755457475317458188410854644350993912519n,
         cloakProgramId = CLOAK_PROGRAM_ID,
         connection = new Connection('https://api.devnet.solana.com', 'confirmed'),
     } = options || {};
@@ -167,6 +168,7 @@ export async function executePrivateProposal(
             // ✅ UNCOMMENT THESE TWO LINES
             depositorKeypair: memberKeypair,
             walletPublicKey: memberKeypair.publicKey,
+            chainNoteViewingKeyNk: getNkFromUtxoPrivateKey(matchedUtxo.keypair.privateKey)
 
         }
     )

@@ -10,7 +10,7 @@ import {
     createZeroUtxo,
     generateUtxoKeypair,
     Utxo,
-    deserializeUtxo
+    deserializeUtxo, getNkFromUtxoPrivateKey
 } from '@cloak.dev/sdk-devnet';
 import bs58 from 'bs58';
 export interface StoredUtxoRecord {
@@ -39,8 +39,7 @@ export async function PrivateDeposit(
 
     console.log(chalk.yellow('⏳ Processing private transfer to Treasury...'));
 
-    // 1. Build Output UTXO
-    const tempKeypair = await generateUtxoKeypair();
+
     const treasuryOutput = await createUtxo(depositAmount, {
         privateKey: 0n,
         publicKey: treasuryId,
@@ -67,6 +66,9 @@ export async function PrivateDeposit(
             walletPublicKey: signer.publicKey,
             useUniqueNullifiers: true,
             enforceViewingKeyRegistration: false,
+
+            chainNoteViewingKeyNk: getNkFromUtxoPrivateKey(inputUtxo.keypair.privateKey)
+
         }
     );
 
