@@ -10,9 +10,11 @@ import {
     deriveUtxoKeypairFromSpendKey,
     bigintToBytes32,
     Utxo,
-    derivePublicKey
+    derivePublicKey, DEVNET_MOCK_USDC_MINT
 } from "@cloak.dev/sdk-devnet"; // Ensure correct import path
+import { getAssociatedTokenAddressSync, getOrCreateAssociatedTokenAccount } from "@solana/spl-token";
 import { deriveViewingKeyFromUtxoPrivateKey } from "@cloak.dev/sdk-devnet";
+import { sign } from "crypto";
 function uint8ArrayToBigInt(bytes: Uint8Array): bigint {
     // Create a DataView to read the buffer
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -46,8 +48,7 @@ async function main() {
         Uint8Array.from(JSON.parse(readFileSync(keypairPath, "utf8")))
     );
 
-    console.log(`🚀 Starting Round-Trip: Public -> Private -> Private -> Public`);
-    console.log(`Amount: ${Number(amountLamports) / 1e9} SOL`);
+
 
     // --- STEP 1: DEPOSIT (Public -> Private) ---
     console.log("\n1️⃣ Depositing public SOL into private pool...");
@@ -81,60 +82,27 @@ async function main() {
     console.log("✅ Deposit successful. Note Index:", myNote.index);
 
 
-    // --- STEP 2: TRANSFER (Private -> Private) ---
-    // In this scenario, YOU are both sender and recipient.
-    // So we transfer from 'myPrivateNote' to a NEW note owned by YOU.
-
-    console.log("\n2️⃣ Transferring privately (Self-to-Self)...");
-    // STEP 2: Transfer — use transact directly, NOT transfer()
-    console.log("\n2️⃣ Transferring privately...");
-
-    const newOwnerKp = await generateUtxoKeypair();
-
-    // Build both outputs yourself — this keeps keypairs attached
-    const recipientOutput = await createUtxo(amountLamports, {
-        privateKey: 0n,
-        publicKey: newOwnerKp.publicKey,
-    }, NATIVE_SOL_MINT);
-    const changeOutput = await createZeroUtxo(NATIVE_SOL_MINT); // zero change
-
-    const transferResult = await transact(
-        {
-            inputUtxos: [myNote],
-            outputUtxos: [recipientOutput, changeOutput],
-        },
-        {
-            connection,
-            programId: CLOAK_PROGRAM_ID,
-            depositorKeypair: signer,
-            walletPublicKey: signer.publicKey,
-            cachedMerkleTree: depositResult.merkleTree,
-            useUniqueNullifiers: true,
-            enforceViewingKeyRegistration: false,
-        }
-    );
-    console.log(recipientOutput);
-    transferResult.outputUtxos[0].keypair = newOwnerKp;
-    await new Promise(r => setTimeout(r, 20_000));
-    console.log("✅ Transfer done. Note index:", transferResult.outputUtxos[0].index);
-
-    // STEP 3: Withdraw — outputUtxos[0] now has newOwnerKp attached, circuit can spend it
-    const withdrawResult = await fullWithdraw(
-        [transferResult.outputUtxos[0]],  // only the recipient output, not the zero change
+    const recipientUsdcAta = await getOrCreateAssociatedTokenAccount(
+        connection,
+        signer,
+        DEVNET_MOCK_USDC_MINT,
         signer.publicKey,
+    );
+    const swapResult = await swapWithChange(
+        [myNote],
+        amountLamports, // amount to swap
+        DEVNET_MOCK_USDC_MINT,
+        recipientUsdcAta.address,
+        1n, // replace with quote-based min output
         {
             connection,
             programId: CLOAK_PROGRAM_ID,
-            //  depositorKeypair: signer,
-            //  walletPublicKey: signer.publicKey,
-            // cachedMerkleTree: transferResult.merkleTree,
             enforceViewingKeyRegistration: false,
-        }
+            cachedMerkleTree: depositResult.merkleTree,
+        },
+        signer.publicKey,
     );
-    console.log(transferResult.outputUtxos[0]);
-    console.log("\n🎉 Round-Trip Complete!");
-    console.log("Withdraw Signature:", withdrawResult.signature);
-    console.log("Check your public balance to confirm funds returned.");
+    console.log("Swap Result: ", swapResult);
 
 }
 

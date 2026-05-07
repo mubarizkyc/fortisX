@@ -1,18 +1,19 @@
-import { Connection, Keypair } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import path from 'path';
 import fs from 'fs';
 import chalk from 'chalk';
 import {
     CLOAK_PROGRAM_ID,
-    NATIVE_SOL_MINT,
     transact,
     createUtxo,
     createZeroUtxo,
     generateUtxoKeypair,
     Utxo,
-    deserializeUtxo, getNkFromUtxoPrivateKey
+    deserializeUtxo, getNkFromUtxoPrivateKey,
+    bigintToBytes32
 } from '@cloak.dev/sdk-devnet';
 import bs58 from 'bs58';
+import { bigIntToLittleEndianBytes } from '../utils';
 export interface StoredUtxoRecord {
     id: string;
     timestamp: number;
@@ -39,18 +40,19 @@ export async function PrivateDeposit(
 
     console.log(chalk.yellow('⏳ Processing private transfer to Treasury...'));
 
+    //Deserialize Input UTXO
+    const inputUtxoBytes = bs58.decode(depositorUtxo); // Or use bs58.decode
+    const inputUtxo = await deserializeUtxo(inputUtxoBytes);
 
+
+    console.log("mint: ", inputUtxo.mintAddress);
+    const changeOutput = await createZeroUtxo(inputUtxo.mintAddress);
     const treasuryOutput = await createUtxo(depositAmount, {
         privateKey: 0n,
         publicKey: treasuryId,
-    }, NATIVE_SOL_MINT);
+    }, inputUtxo.mintAddress);
 
-    // 2. Build Change Output
-    const changeOutput = await createZeroUtxo(NATIVE_SOL_MINT);
 
-    // 3. Deserialize Input UTXO
-    const inputUtxoBytes = bs58.decode(depositorUtxo); // Or use bs58.decode
-    const inputUtxo = await deserializeUtxo(inputUtxoBytes);
 
     // 4. Execute Transaction
     console.log("Sending transaction...");

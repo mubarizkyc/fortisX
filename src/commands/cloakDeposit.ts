@@ -10,6 +10,7 @@ import {
 import {
     Connection,
     Keypair,
+    PublicKey,
 
 } from '@solana/web3.js'
 import * as fs from "fs";
@@ -18,25 +19,27 @@ import bs58 from "bs58";
 
 // src/commands/cloakDeposit.ts
 export async function CloakDeposit(
-    depositAmount: bigint, // Fixed typo from 'depoistAmount'
+    depositAmount: bigint,
     signer: Keypair,
+    mint: string,
 ) {
+    console.log("MINT: ", mint);
+    console.log("native sol mint", NATIVE_SOL_MINT);
     const connection = new Connection("https://api.devnet.solana.com", "confirmed");
 
-    //    const skSpend = signer.secretKey.slice(0, 32);
     const utxoKeypair = await generateUtxoKeypair();
     const viewingKeyNk = getNkFromUtxoPrivateKey(utxoKeypair.privateKey);
     //print viewing key for debugging
     console.log(utxoKeypair.publicKey.toString());
     console.log(viewingKeyNk.toString());
-
+    const MINT = new PublicKey(mint);
     // 2. Create the output UTXO structure
-    const output = await createUtxo(depositAmount, utxoKeypair, NATIVE_SOL_MINT);
+    const output = await createUtxo(depositAmount, utxoKeypair, MINT);
     console.log("Output UTXO created:", output);
 
     // 3. Execute the private deposit transaction
     const depositResult = await transact({
-        inputUtxos: [await createZeroUtxo(NATIVE_SOL_MINT)], // Zero-knowledge input
+        inputUtxos: [await createZeroUtxo(MINT)], // Zero-knowledge input
         outputUtxos: [output],
         externalAmount: depositAmount,
         depositor: signer.publicKey,

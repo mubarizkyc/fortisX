@@ -21,6 +21,32 @@ function rawArg(flag: string): string | undefined {
     const idx = process.argv.indexOf(flag)
     return idx !== -1 ? process.argv[idx + 1] : undefined
 }
+function parseBigIntArray(raw: string | undefined, label: string): bigint[] {
+    if (!raw) throw new Error(`--${label} is required`);
+
+    return raw.split(',').map((val, i) => {
+        const cleaned = val.trim().replace(/^0x/i, '').replace(/n$/, '');
+        if (!cleaned || !/^[0-9a-fA-F]+$/.test(cleaned)) {
+            throw new Error(`Invalid ${label}[${i}]: "${val}" (expected decimal or 0x hex)`);
+        }
+        return BigInt(cleaned);
+    });
+}
+
+// ────────────────────────────────────────────────────────────
+// Helper: Parse comma-separated PublicKey values
+// ────────────────────────────────────────────────────────────
+function parsePublicKeyArray(raw: string | undefined, label: string): PublicKey[] {
+    if (!raw) throw new Error(`--${label} is required`);
+
+    return raw.split(',').map((val, i) => {
+        try {
+            return new PublicKey(val.trim());
+        } catch {
+            throw new Error(`Invalid ${label}[${i}]: "${val}" (expected base58 pubkey)`);
+        }
+    });
+}
 
 // ────────────────────────────────────────────────────────────
 // Helpers
@@ -332,6 +358,7 @@ cli
 cli
     .command('cloak_deposit', 'Deposit SOL into Cloak Protocol (Private)')
     .option('--keypair <path>', 'Path to signer keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
+    .option('--mint <mint>', 'Asset Address', { type: String })
     .option('--amount <lamports>', 'Amount to deposit in lamports', { type: Number })
     .action(async (options) => {
         try {
@@ -343,7 +370,7 @@ cli
             console.log(chalk.blue('Amount:'), amount, 'lamports');
             console.log(chalk.yellow('⏳ Processing private deposit...'));
 
-            await CloakDeposit(BigInt(amount), signer);
+            await CloakDeposit(BigInt(amount), signer, options.mint);
             console.log(chalk.green('✅ Cloak Deposit Completed!'));
 
         } catch (error: any) {
@@ -476,57 +503,154 @@ cli
 
 // --- create_private_transfer_proposal (BigInt-safe) ---
 cli
-    .command('create_private_transfer_proposal', 'Create a private Cloak transfer proposal')
-    .option('--keypair <path>', 'Path to creator keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
-    .option('--multisig <address>', 'Multisig account address (base58)')
-    // ✅ FIX: Force string type to preserve full precision
-    .option('--commitment <value>', 'UTXO commitment (decimal or 0x hex)', { type: String })
-    .option('--target <value>', 'Recipient public key (base58 or bigint)')
-    .option('--amount <value>', 'Amount in lamports', { type: String })
+    .command('create_private_transfer_proposal', 'Create a private Cloak transfer proposal (single or batch)')
+    .option('--keypair <path>', 'Path to creator keypair JSON', {
+        default: '/home/mubariz/.config/solana/id.json'
+    })
+    .option('--multisig <address>', 'Multisig account address (base58)', { required: true })
+    .option('--mint <address>', 'asset address (base58)', { required: true })
+
+    // ✅ Array inputs: comma-separated values (all arrays must be same length)
+    .option('--commitments <values>', 'UTXO commitments (comma-separated, decimal or 0x hex)', { type: String })
+    .option('--targets <pubkeys>', 'Recipient public keys (comma-separated, base58)', { type: String })
+    .option('--amounts <values>', 'Amounts in lamports (comma-separated, decimal or 0x hex)', { type: String })
+
+    // ✅ Legacy single-value flags (for backward compatibility)
+    .option('--commitment <value>', 'Single UTXO commitment (deprecated: use --commitments)', { type: String })
+    .option('--target <pubkey>', 'Single recipient (deprecated: use --targets)', { type: String })
+    .option('--amount <value>', 'Single amount (deprecated: use --amounts)', { type: String })
+
+    .option('--deadline <seconds>', 'Voting deadline in seconds (default: 86400 = 1 day)', { type: String })
     .action(async (options) => {
         try {
+            console.log(chalk.yellow('🔐 Creating private transfer proposal...'));
 
-            // ✅ read directly from process.argv — never touched by CLI framework
-            const commitmentStr = rawArg('--commitment')
-            const amountStr = rawArg('--amount')
+            // ────────────────────────────────────────────────────────
+            // 1. Parse inputs: support both single-value and batch modes
+            // ────────────────────────────────────────────────────────
 
-            if (!commitmentStr) throw new Error('--commitment is required')
-            if (!amountStr) throw new Error('--amount is required')
+            // Check if using batch mode (new flags) or legacy mode (old flags)
+            const isBatchMode = options.commitments || options.targets || options.amounts;
 
-            // now safe — these are raw strings
-            const commitment = BigInt(commitmentStr)
-            const amount = BigInt(amountStr)
+            let commitments: bigint[];
+            let recipients: PublicKey[];
+            let amounts: bigint[];
 
-            // these are fine as-is — pubkeys are strings, no precision issue
-            const multisig = new PublicKey(options.multisig)
-            const recipient = new PublicKey(options.target)
-            const creator = loadKeypair(options.keypair)
+            if (isBatchMode) {
+                // ✅ BATCH MODE: parse comma-separated arrays
+                commitments = parseBigIntArray(options.commitments, 'commitments');
+                recipients = parsePublicKeyArray(options.targets, 'targets');
+                amounts = parseBigIntArray(options.amounts, 'amounts');
 
+                // Validate array lengths match
+                if (commitments.length !== recipients.length || commitments.length !== amounts.length) {
+                    throw new Error(
+                        `Array length mismatch: commitments=${commitments.length}, ` +
+                        `targets=${recipients.length}, amounts=${amounts.length}. ` +
+                        `All arrays must have the same length.`
+                    );
+                }
 
+                if (commitments.length === 0) {
+                    throw new Error('At least one payout entry required');
+                }
+                if (commitments.length > 255) {
+                    throw new Error('Max 255 entries per proposal (Solana transaction size limit)');
+                }
+
+                console.log(chalk.blue(`📦 Batch mode: ${commitments.length} payout entries`));
+            } else {
+                // ✅ LEGACY MODE: single payout (backward compatible)
+                // Use rawArg for BigInt precision on commitment/amount
+                const commitmentStr = rawArg('--commitment');
+                const amountStr = rawArg('--amount');
+
+                if (!commitmentStr) throw new Error('--commitment is required (or use --commitments for batch)');
+                if (!amountStr) throw new Error('--amount is required (or use --amounts for batch)');
+                if (!options.target) throw new Error('--target is required (or use --targets for batch)');
+
+                commitments = [BigInt(commitmentStr)];
+                amounts = [BigInt(amountStr)];
+                recipients = [new PublicKey(options.target)];
+
+                console.log(chalk.blue('📦 Single payout mode'));
+            }
+
+            // Parse other inputs
+            const mint = new PublicKey(options.mint);
+            const multisig = new PublicKey(options.multisig);
+            const creator = loadKeypair(options.keypair);
+            const votingDeadlineSeconds = options.deadline
+                ? parseInt(options.deadline, 10)
+                : undefined;
+
+            // ────────────────────────────────────────────────────────
+            // 2. Log summary
+            // ────────────────────────────────────────────────────────
             console.log(chalk.blue('Creator:'), creator.publicKey.toBase58());
             console.log(chalk.blue('Multisig:'), multisig.toBase58());
-            console.log(chalk.blue('Recipient:'), recipient.toBase58());
-            console.log(chalk.blue('Amount:'), amount.toString(), 'lamports');
-            console.log(chalk.blue('Commitment:'), '0x' + commitment.toString(16).slice(0, 16) + '...');
-            console.log(chalk.yellow('⏳ Creating private transfer proposal...'));
+            console.log(chalk.blue('Entries:'), commitments.length);
+
+            // Log first entry as preview
+            console.log(chalk.blue('Preview (entry 1):'));
+            console.log('  Commitment:', '0x' + commitments[0].toString(16).slice(0, 16) + '...');
+            console.log('  Amount:    ', amounts[0].toString(), 'lamports');
+            console.log('  Recipient: ', recipients[0].toBase58());
+
+            if (commitments.length > 1) {
+                console.log(chalk.dim(`  ...and ${commitments.length - 1} more entries`));
+            }
+
+            if (votingDeadlineSeconds) {
+                console.log(chalk.blue('Deadline:'), `${votingDeadlineSeconds}s (~${Math.floor(votingDeadlineSeconds / 3600)}h)`);
+            }
+
+            console.log(chalk.yellow('⏳ Creating proposal...'));
+
+            // ────────────────────────────────────────────────────────
+            // 3. Build entries array and call updated function
+            // ────────────────────────────────────────────────────────
+            const entries = commitments.map((commitment, i) => ({
+                commitment,
+                amount: amounts[i],
+                recipient: recipients[i],
+            }));
+            console.log(entries);
 
             await createPrivateTransferProposal(
-                commitment,
+                entries,
+                mint,
                 creator,
                 multisig,
-                recipient,
-                amount,
-
+                { votingDeadlineSeconds }
             );
 
-            console.log(chalk.green('✅ Private Proposal Created!'));
+            // ────────────────────────────────────────────────────────
+            // 4. Success output
+            // ────────────────────────────────────────────────────────
+            console.log(chalk.green('✅ Private proposal created!'));
+
 
         } catch (error: any) {
-            console.error(chalk.red('❌ Error:'), error.message);
+            console.error(chalk.red('❌ Proposal creation failed:'), error.message);
+
+            // Helpful hints for common errors
+            if (error.message?.includes('Array length')) {
+                console.error('💡 Hint: All arrays (--commitments, --targets, --amounts) must have the same length');
+                console.error('💡 Example: --commitments "c1,c2,c3" --targets "pk1,pk2,pk3" --amounts "100,200,300"');
+            } else if (error.message?.includes('Invalid') && error.message?.includes('commitment')) {
+                console.error('💡 Hint: Commitments must be valid BigInt (decimal or 0x hex), comma-separated');
+            } else if (error.message?.includes('Invalid') && error.message?.includes('target')) {
+                console.error('💡 Hint: Targets must be valid base58 Solana pubkeys, comma-separated');
+            } else if (error.message?.includes('255')) {
+                console.error('💡 Hint: Max 255 entries per proposal due to Solana transaction size limits');
+            }
+
             if (error.logs && Array.isArray(error.logs)) {
                 console.error('📜 Program Logs:');
                 error.logs.forEach((log: string) => console.error('  ', log));
             }
+
             process.exit(1);
         }
     });
