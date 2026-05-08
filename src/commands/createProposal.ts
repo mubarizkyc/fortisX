@@ -90,15 +90,11 @@ export async function createProposalFromTx(
     encodedTransaction: string, // Base58-encoded transaction
     connection: Connection,
     options?: {
-        proposalType?: number;      // Default: 0 (Transfer)
-        votingDeadlineHours?: number; // Default: 24
-        ephemeralSigners?: number;  // Default: 0
+        votingDeadlineHours?: number; // Default: 2
     }
 ) {
     const {
-        proposalType = 0,
         votingDeadlineHours = 24,
-        ephemeralSigners = 0,
     } = options || {};
 
     // 1. Fetch multisig account to get current transaction_index

@@ -287,13 +287,13 @@ cli
 // --- create_multisig ---
 cli
     .command('create_multisig', 'Create a new multisig configuration')
-    .option('--addresses <addresses>', 'Space-separated list of public keys')
+    .option('--members <members>', 'Space-separated list of public keys')
     .option('--threshold <threshold>', 'Number of required signatures', { type: Number })
     .action(async (options) => {
         try {
             const creator = loadKeypair('/home/mubariz/.config/solana/id.json');
 
-            let rawAddresses = options.addresses;
+            let rawAddresses = options.members;
             if (typeof rawAddresses === 'string') {
                 rawAddresses = rawAddresses.split(' ').filter(Boolean);
             }
