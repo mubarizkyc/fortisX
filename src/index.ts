@@ -1,13 +1,36 @@
 #!/usr/bin/env node
+/**
+ * FortisX CLI — Environment-Configured Multisig & Privacy Tool
+ * 
+ * Environment Variables:
+ *   SOLANA_RPC_URL   - Solana RPC endpoint (default: Helius devnet)
+ *   KEYPAIR_PATH     - Default path to signer keypair JSON (default: ~/.config/solana/id.json)
+ * 
+ * CLI Overrides:
+ *   --rpc <url>      - Override SOLANA_RPC_URL for this command
+ *   --keypair <path> - Override KEYPAIR_PATH for this command
+ */
+
 import cac from 'cac';
 import chalk from 'chalk';
 import { request, Agent } from 'undici';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
+
+// ────────────────────────────────────────────────────────────
+// Environment Configuration
+// ────────────────────────────────────────────────────────────
+const ENV = {
+    RPC_URL: process.env.SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=64096058-650d-4e15-99cd-842c236765ef',
+    KEYPAIR_PATH: process.env.KEYPAIR_PATH || path.join(process.env.HOME || '', '.config/solana/id.json'),
+};
+
+// ────────────────────────────────────────────────────────────
+// Import Commands
+// ────────────────────────────────────────────────────────────
 import { executePrivateProposal } from './commands/executePrivateProposal';
 import { ScanComplianceOptions, scanCompliance } from './commands/viewComplianceReport';
-// Import all command functions
 import { createMultisig } from './commands/createMultisig';
 import { publicDeposit } from './commands/publicDeposit';
 import { CloakDeposit } from './commands/cloakDeposit';
@@ -16,68 +39,58 @@ import { createTransferProposal } from './commands/createTransferProposal';
 import { approveProposal } from './commands/approveProposal';
 import { executeProposal } from './commands/executeProposal';
 import { createPrivateTransferProposal } from './commands/createPrivateTransferProposal.ts';
-import { createPrivateSwapProposal } from './commands/createPrivateSwapProposal';
+import { createPrivateSwapProposal, SwapEntry } from './commands/createPrivateSwapProposal';
 import { fetchAndDecryptShare } from './shareCrypto';
-import { SwapEntry } from './commands/createPrivateSwapProposal';
-function rawArg(flag: string): string | undefined {
-    const idx = process.argv.indexOf(flag)
-    return idx !== -1 ? process.argv[idx + 1] : undefined
-}
-function parseBigIntArray(raw: string | undefined, label: string): bigint[] {
-    if (!raw) throw new Error(`--${label} is required`);
-
-    return raw.split(',').map((val, i) => {
-        const cleaned = val.trim().replace(/^0x/i, '').replace(/n$/, '');
-        if (!cleaned || !/^[0-9a-fA-F]+$/.test(cleaned)) {
-            throw new Error(`Invalid ${label}[${i}]: "${val}" (expected decimal or 0x hex)`);
-        }
-        return BigInt(cleaned);
-    });
-}
 
 // ────────────────────────────────────────────────────────────
-// Helper: Parse comma-separated PublicKey values
-// ────────────────────────────────────────────────────────────
-function parsePublicKeyArray(raw: string | undefined, label: string): PublicKey[] {
-    if (!raw) throw new Error(`--${label} is required`);
-
-    return raw.split(',').map((val, i) => {
-        try {
-            return new PublicKey(val.trim());
-        } catch {
-            throw new Error(`Invalid ${label}[${i}]: "${val}" (expected base58 pubkey)`);
-        }
-    });
-}
-
-// ────────────────────────────────────────────────────────────
-// Helpers
+// Global Helpers
 // ────────────────────────────────────────────────────────────
 
 /**
- * Safe BigInt parsing: handles decimal, hex (0x...), and trailing 'n'
+ * Get RPC URL: CLI arg > env var > default
  */
+function getRpcUrl(cliRpc?: string): string {
+    return cliRpc || ENV.RPC_URL;
+}
+
 /**
- * Safe BigInt parsing: handles decimal, hex (0x...), trailing 'n', or already-parsed values
+ * Get keypair path: CLI arg > env var > default
+ */
+function getKeypairPath(cliPath?: string): string {
+    return path.resolve(cliPath || ENV.KEYPAIR_PATH);
+}
+
+/**
+ * Load connection with commitment level
+ */
+function getConnection(rpcUrl?: string, commitment: 'processed' | 'confirmed' | 'finalized' = 'confirmed'): Connection {
+    return new Connection(getRpcUrl(rpcUrl), commitment);
+}
+
+/**
+ * Load keypair from JSON file
+ */
+function loadKeypair(keypairPath?: string): Keypair {
+    const resolved = getKeypairPath(keypairPath);
+    try {
+        const secretKey = JSON.parse(readFileSync(resolved, 'utf8'));
+        return Keypair.fromSecretKey(Uint8Array.from(secretKey));
+    } catch (error: any) {
+        throw new Error(`Failed to load keypair from "${resolved}": ${error.message}`);
+    }
+}
+
+/**
+ * Safe BigInt parsing: handles decimal, hex (0x...), trailing 'n'
  */
 function parseBigInt(value: string | number | bigint): bigint {
-    // If already a bigint, return as-is
     if (typeof value === 'bigint') return value;
-
-    // If a number, warn about precision loss (shouldn't happen with {type: String})
     if (typeof value === 'number') {
         console.warn('⚠️ Warning: value was parsed as Number - may lose precision');
         return BigInt(Math.round(value));
     }
-
-    // Handle string input
     const cleaned = String(value).trim().replace(/^0x/, '').replace(/n$/, '');
-
-    // Validate it's not empty
-    if (!cleaned) {
-        throw new Error('Cannot parse empty value as BigInt');
-    }
-
+    if (!cleaned) throw new Error('Cannot parse empty value as BigInt');
     return BigInt(cleaned);
 }
 
@@ -86,7 +99,6 @@ function parseBigInt(value: string | number | bigint): bigint {
  */
 function parsePublicKey(value: string): PublicKey {
     if (value.length === 44) return new PublicKey(value);
-
     const bytes = new Uint8Array(32);
     let remaining = parseBigInt(value);
     for (let i = 0; i < 32; i++) {
@@ -97,69 +109,85 @@ function parsePublicKey(value: string): PublicKey {
 }
 
 /**
- * Load keypair from JSON file
+ * Read raw argv to bypass CLI framework coercion (for BigInt precision)
  */
-function loadKeypair(keypairPath: string): Keypair {
-    const resolved = path.resolve(keypairPath);
-    return Keypair.fromSecretKey(
-        Uint8Array.from(JSON.parse(readFileSync(resolved, 'utf8')))
-    );
+function rawArg(flag: string): string | undefined {
+    const idx = process.argv.indexOf(flag);
+    return idx !== -1 && idx + 1 < process.argv.length ? process.argv[idx + 1] : undefined;
 }
 
 /**
- * Default Devnet connection
+ * Parse comma-separated BigInt values
  */
-function getDevnetConnection(): Connection {
-    return new Connection('https://devnet.helius-rpc.com/?api-key=64096058-650d-4e15-99cd-842c236765ef');
+function parseBigIntArray(raw: string | undefined, label: string): bigint[] {
+    if (!raw) throw new Error(`--${label} is required`);
+    return raw.split(',').map((val, i) => {
+        const cleaned = val.trim().replace(/^0x/i, '').replace(/n$/, '');
+        if (!cleaned || !/^[0-9a-fA-F]+$/.test(cleaned)) {
+            throw new Error(`Invalid ${label}[${i}]: "${val}" (expected decimal or 0x hex)`);
+        }
+        return BigInt(cleaned);
+    });
+}
+
+/**
+ * Parse comma-separated PublicKey values
+ */
+function parsePublicKeyArray(raw: string | undefined, label: string): PublicKey[] {
+    if (!raw) throw new Error(`--${label} is required`);
+    return raw.split(',').map((val, i) => {
+        try {
+            return new PublicKey(val.trim());
+        } catch {
+            throw new Error(`Invalid ${label}[${i}]: "${val}" (expected base58 pubkey)`);
+        }
+    });
 }
 
 // ────────────────────────────────────────────────────────────
 // CLI Setup
 // ────────────────────────────────────────────────────────────
+const cli = cac('fortisx');
 
-const cli = cac('fortisign');
+// Global options (available to all commands)
+cli
+    .option('--rpc <url>', 'Solana RPC URL (overrides SOLANA_RPC_URL)')
+    .option('--keypair <path>', 'Path to signer keypair JSON (overrides KEYPAIR_PATH)')
+    .option('--commitment <level>', 'RPC commitment level', {
+        default: 'confirmed',
+        choices: ['processed', 'confirmed', 'finalized']
+    });
+
 // ────────────────────────────────────────────────────────────
-// CLI Command: submit_share
+// Command: submit_share
 // ────────────────────────────────────────────────────────────
 cli
     .command('submit_share', 'Fetch, decrypt, and submit your Shamir share to the collector')
-    .option('--keypair <path>', 'Path to YOUR member keypair JSON (for decryption)', {
-        default: '/home/mubariz/.config/solana/id.json'
-    })
-    .option('--multisig <address>', 'Multisig account address (base58)')
+    .option('--multisig <address>', 'Multisig account address (base58)', { required: true })
     .option('--collector-url <url>', 'Share collector endpoint', {
-        // Change https → http for local development
         default: 'http://localhost:3456/api/submit-share'
     })
     .option('--insecure', 'Allow self-signed HTTPS certificates (for local testing)', { default: false })
     .option('--timeout <ms>', 'Request timeout in milliseconds', { type: Number, default: 30000 })
-    .action(async (options) => {
+    .action(async (options, cmd) => {
         try {
-            // 1. Validate inputs
             if (!options.multisig) throw new Error('--multisig <address> is required');
-            if (!options.keypair) throw new Error('--keypair <path> is required');
 
             const multisigAddress = new PublicKey(options.multisig);
             const memberKeypair = loadKeypair(options.keypair);
-            const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+            const connection = getConnection(options.rpc);
 
             console.log(chalk.blue('Member:'), memberKeypair.publicKey.toBase58());
             console.log(chalk.blue('Multisig:'), multisigAddress.toBase58());
             console.log(chalk.blue('Collector URL:'), options.collectorUrl);
             console.log(chalk.yellow('🔐 Fetching encrypted share from on-chain...'));
 
-            // 2. Fetch and decrypt share
-            const decryptedShare = await fetchAndDecryptShare(
-                multisigAddress,
-                memberKeypair,
-                connection
-            );
+            const decryptedShare = await fetchAndDecryptShare(multisigAddress, memberKeypair, connection);
 
             console.log(chalk.green('✅ Share decrypted successfully'));
             console.log('Decrypted share (first 8 bytes, hex):',
                 Buffer.from(decryptedShare.slice(0, 8)).toString('hex') + '...');
 
-            // 3. Submit to collector server using undici (supports custom TLS)
             console.log(chalk.yellow('📤 Submitting share to collector...'));
 
             const requestBody = JSON.stringify({
@@ -168,13 +196,8 @@ cli
                 timestamp: Date.now(),
             });
 
-            // Configure dispatcher for insecure connections if needed
             const dispatcher = options.insecure
-                ? new Agent({
-                    connect: {
-                        rejectUnauthorized: false, // Skip TLS verification for local testing
-                    },
-                })
+                ? new Agent({ connect: { rejectUnauthorized: false } })
                 : undefined;
 
             const { statusCode, body } = await request(options.collectorUrl, {
@@ -184,12 +207,11 @@ cli
                     'Content-Length': Buffer.byteLength(requestBody).toString(),
                 },
                 body: requestBody,
-                dispatcher, // Apply custom agent if --insecure flag is set
+                dispatcher,
                 signal: AbortSignal.timeout(options.timeout),
             });
 
             const responseText = await body.text();
-
             if (statusCode !== 200) {
                 throw new Error(`Collector returned ${statusCode}: ${responseText}`);
             }
@@ -206,114 +228,80 @@ cli
 
         } catch (error: any) {
             console.error(chalk.red('❌ Share submission failed:'), error.message);
-
             if (error.code === 'ECONNREFUSED') {
                 console.error('💡 Is the share collector server running?');
-                console.error('💡 Try: npx tsx src/index.ts execute_private_proposal ... (in another terminal)');
-            } else if (error.code === 'ERR_TLS_CERT_ALTNAME_INVALID' || error.code === 'DEPTH_ZERO_SELF_SIGNED_CERT') {
-                console.error('💡 TLS certificate error. Ensure --insecure flag is set for self-signed certs.');
-            } else if (error.name === 'TimeoutError' || error.message?.includes('timeout')) {
-                console.error('💡 Request timed out. Increase --timeout or check network connectivity.');
+            } else if (error.code?.includes('TLS') || error.code?.includes('CERT')) {
+                console.error('💡 TLS certificate error. Use --insecure for self-signed certs.');
             }
-
             process.exit(1);
         }
     });
+
 // ────────────────────────────────────────────────────────────
-// CLI Command: execute_private_proposal (Simplified)
+// Command: execute_private_proposal
 // ────────────────────────────────────────────────────────────
 cli
     .command('execute_private_proposal', 'Execute an approved private Cloak proposal')
-    .option('--keypair <path>', 'Path to executing member keypair JSON', {
-        default: '/home/mubariz/.config/solana/id.json'
-    })
-    .option('--multisig <address>', 'Multisig account address (base58)')
-    // ✅ FIX: Force string type to prevent Number coercion for BigInt
-    .option('--proposal-number <value>', 'Proposal number to execute (decimal or 0x hex)', { type: String })
-    // ✅ UTXO file option (one Base58-encoded UTXO per line)
-    .option('--utxo-file <path>', 'Path to file with Base58 UTXOs (one per line)', {
-        default: './multisig_utxo_logs.txt'
-    })
-    // Optional: DAO DB for blinding factor lookup (if not in UTXO file)
-    .option('--dao-db <path>', 'Path to local DAO UTXO database JSON', {
-        default: './dao_utxo_db.json'
-    })
-    // Optional: Cloak program ID override
-    .option('--cloak-program <address>', 'Cloak program ID (base58)')
-    .action(async (options) => {
+    .option('--multisig <address>', 'Multisig account address (base58)', { required: true })
+    .option('--proposal-number <value>', 'Proposal number to execute (decimal or 0x hex)', { type: String, required: true })
+    .option('--utxo-file <path>', 'Path to file with Base58 UTXOs', { default: './multisig_utxo_logs.txt' })
+    .option('--collector-port <port>', 'Port for share collector server', { type: Number, default: 3456 })
+    .option('--share-timeout-ms <ms>', 'Timeout for share collection', { type: Number, default: 300000 })
+    .action(async (options, cmd) => {
         try {
-            // 1. Validate required inputs
-            if (!options.multisig) throw new Error('--multisig <address> is required');
-            if (!options.proposalNumber) throw new Error('--proposal-number <value> is required');
-
-            // 2. Parse inputs safely
             const multisig = new PublicKey(options.multisig);
             const proposalNumber = parseBigInt(options.proposalNumber);
             const creator = loadKeypair(options.keypair);
-
-
-
+            const connection = getConnection(options.rpc, options.commitment);
 
             console.log(chalk.blue('Executing Member:'), creator.publicKey.toBase58());
             console.log(chalk.blue('Multisig:'), multisig.toBase58());
             console.log(chalk.blue('Proposal Number:'), proposalNumber.toString());
-            console.log(chalk.blue('UTXO File:'), options.utxoFile);
-            console.log(chalk.yellow('⏳ Executing private transfer proposal...'));
+            console.log(chalk.yellow('⏳ Executing private proposal...'));
 
-            // 3. Execute the proposal with simplified flow
-            const result = await executePrivateProposal(
-                creator,
-                multisig,
-                proposalNumber,
-                {
+            const result = await executePrivateProposal(creator, multisig, proposalNumber, {
+                connection,
+                utxoFilePath: options.utxoFile,
+                collectorPort: options.collectorPort,
+                shareTimeoutMs: options.shareTimeoutMs,
+            });
 
-                }
-            );
-            //1 000 000 0
-            //1 000 000 0
-            //1 000 000 000
+            console.log(chalk.green('✅ Private proposal executed successfully!'));
 
         } catch (error: any) {
             console.error(chalk.red('❌ Execution Failed:'), error.message);
-
             if (error.logs && Array.isArray(error.logs)) {
                 console.error('📜 Program Logs:');
                 error.logs.forEach((log: string) => console.error('  ', log));
             }
-
             process.exit(1);
         }
     });
-// --- create_multisig ---
+
+// ────────────────────────────────────────────────────────────
+// Command: create_multisig
+// ────────────────────────────────────────────────────────────
 cli
     .command('create_multisig', 'Create a new multisig configuration')
-    .option('--members <members>', 'Space-separated list of public keys')
-    .option('--threshold <threshold>', 'Number of required signatures', { type: Number })
-    .action(async (options) => {
+    .option('--members <members>', 'Space-separated list of public keys', { required: true })
+    .option('--threshold <threshold>', 'Number of required signatures', { type: Number, required: true })
+    .action(async (options, cmd) => {
         try {
-            const creator = loadKeypair('/home/mubariz/.config/solana/id.json');
+            const creator = loadKeypair(options.keypair);
+            const connection = getConnection(options.rpc, options.commitment);
 
-            let rawAddresses = options.members;
-            if (typeof rawAddresses === 'string') {
-                rawAddresses = rawAddresses.split(' ').filter(Boolean);
-            }
-            const addresses = Array.isArray(rawAddresses)
-                ? rawAddresses.map((a: any) => String(a).trim()).filter(Boolean)
-                : [];
-
-            if (addresses.length === 0) throw new Error('At least one address is required');
-
-            const members = addresses.map((a: string) => {
-                try { return new PublicKey(a); }
+            const rawAddresses = options.members.split(' ').filter(Boolean);
+            const members = rawAddresses.map(a => {
+                try { return new PublicKey(a.trim()); }
                 catch (e: any) { throw new Error(`Invalid public key: "${a}". ${e.message}`); }
             });
 
             const threshold = options.threshold;
-            if (!threshold || threshold < 1 || threshold > members.length) {
+            if (threshold < 1 || threshold > members.length) {
                 throw new Error(`Threshold must be between 1 and ${members.length}`);
             }
 
-            await createMultisig(members, threshold, creator.publicKey, creator, new Connection('https://api.devnet.solana.com', 'confirmed'));
+            await createMultisig(members, threshold, creator.publicKey, creator, connection);
             console.log(chalk.green('✅ Multisig Created!'));
 
         } catch (error: any) {
@@ -322,21 +310,20 @@ cli
         }
     });
 
-// --- public_deposit ---
+// ────────────────────────────────────────────────────────────
+// Command: public_deposit
+// ────────────────────────────────────────────────────────────
 cli
     .command('public_deposit', 'Deposit SOL into a public treasury')
-    .option('--keypair <path>', 'Path to depositor keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
-    .option('--amount <lamports>', 'Amount to deposit in lamports', { type: Number })
-    .option('--multisig <address>', 'Multisig account address (required)')
-    .action(async (options) => {
+    .option('--amount <lamports>', 'Amount to deposit in lamports', { type: Number, required: true })
+    .option('--multisig <address>', 'Multisig account address', { required: true })
+    .action(async (options, cmd) => {
         try {
             const amount = options.amount;
             if (!amount || amount <= 0) throw new Error('Valid --amount (in lamports) is required');
-            if (!options.multisig) throw new Error('--multisig <address> is required');
 
             const depositor = loadKeypair(options.keypair);
             const multisigPubkey = new PublicKey(options.multisig);
-            const NATIVE_SOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
 
             console.log(chalk.blue('Depositor:'), depositor.publicKey.toBase58());
             console.log(chalk.blue('Amount:'), amount, 'lamports');
@@ -350,23 +337,26 @@ cli
         }
     });
 
-// --- cloak_deposit ---
+// ────────────────────────────────────────────────────────────
+// Command: cloak_deposit
+// ────────────────────────────────────────────────────────────
 cli
     .command('cloak_deposit', 'Deposit SOL into Cloak Protocol (Private)')
-    .option('--keypair <path>', 'Path to signer keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
-    .option('--mint <mint>', 'Asset Address', { type: String })
-    .option('--amount <lamports>', 'Amount to deposit in lamports', { type: Number })
-    .action(async (options) => {
+    .option('--mint <mint>', 'Asset Address (base58)', { required: true })
+    .option('--amount <lamports>', 'Amount to deposit in lamports', { type: Number, required: true })
+    .action(async (options, cmd) => {
         try {
             const amount = options.amount;
-            if (!amount || amount <= 0) throw new Error('Valid --amount (in lamports) is required');
+            if (!amount || amount <= 0) throw new Error('Valid --amount is required');
 
             const signer = loadKeypair(options.keypair);
+            const connection = getConnection(options.rpc, options.commitment);
+
             console.log(chalk.blue('Signer:'), signer.publicKey.toBase58());
             console.log(chalk.blue('Amount:'), amount, 'lamports');
             console.log(chalk.yellow('⏳ Processing private deposit...'));
 
-            await CloakDeposit(BigInt(amount), signer, options.mint, new Connection('https://api.devnet.solana.com', 'confirmed'));
+            await CloakDeposit(BigInt(amount), signer, options.mint, connection);
             console.log(chalk.green('✅ Cloak Deposit Completed!'));
 
         } catch (error: any) {
@@ -375,23 +365,19 @@ cli
         }
     });
 
-// --- private_deposit ---
+// ────────────────────────────────────────────────────────────
+// Command: private_deposit
+// ────────────────────────────────────────────────────────────
 cli
     .command('private_deposit', 'Transfer from Private UTXO to Multisig Treasury')
-    .option('--keypair <path>', 'Path to signer keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
-    .option('--amount <lamports>', 'Amount to transfer in lamports', { type: Number })
-    .option('--treasury-id <id>', 'Treasury ID (BigInt) to deposit into')
-    .option('--utxo <base58>', 'Your existing Private UTXO (Base58) to spend')
-    .action(async (options) => {
+    .option('--amount <lamports>', 'Amount to transfer in lamports', { type: Number, required: true })
+    .option('--treasury-id <id>', 'Treasury ID (BigInt) to deposit into', { required: true })
+    .option('--utxo <base58>', 'Your existing Private UTXO (Base58) to spend', { required: true })
+    .action(async (options, cmd) => {
         try {
-            const treasuryidStr = rawArg('--treasury-id');
-            if (!treasuryidStr) throw new Error('--treasury-id <bigint> is required');
-            const treasuryid = BigInt(treasuryidStr)
+            const treasuryid = parseBigInt(rawArg('--treasury-id'));
             const amount = options.amount;
             if (!amount || amount <= 0) throw new Error('Valid --amount is required');
-
-            if (!options.utxo) throw new Error('--utxo <base58> is required');
-
 
             const signer = loadKeypair(options.keypair);
 
@@ -409,22 +395,24 @@ cli
         }
     });
 
-// --- create_transfer_proposal ---
+// ────────────────────────────────────────────────────────────
+// Command: create_transfer_proposal
+// ────────────────────────────────────────────────────────────
 cli
     .command('create_transfer_proposal', 'Create a public transfer proposal for multisig')
-    .option('--keypair <path>', 'Path to creator keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
-    .option('--multisig <address>', 'Multisig account address')
-    .option('--target <address>', 'Transfer recipient address')
-    .option('--amount <lamports>', 'Amount in lamports', { type: Number })
-    .action(async (options) => {
+    .option('--multisig <address>', 'Multisig account address', { required: true })
+    .option('--target <address>', 'Transfer recipient address', { required: true })
+    .option('--amount <lamports>', 'Amount in lamports', { type: Number, required: true })
+    .action(async (options, cmd) => {
         try {
             const multisig = new PublicKey(options.multisig);
             const target = new PublicKey(options.target);
             const amount = BigInt(options.amount);
             const creator = loadKeypair(options.keypair);
+            const connection = getConnection(options.rpc, options.commitment);
 
             console.log(chalk.yellow('Creating transfer proposal...'));
-            await createTransferProposal(creator, multisig, target, amount, new Connection('https://api.devnet.solana.com', 'confirmed'));
+            await createTransferProposal(creator, multisig, target, amount, connection);
             console.log(chalk.green('✅ Proposal Created!'));
 
         } catch (error: any) {
@@ -433,21 +421,19 @@ cli
         }
     });
 
-// --- approve_proposal ---
+// ────────────────────────────────────────────────────────────
+// Command: approve_proposal
+// ────────────────────────────────────────────────────────────
 cli
     .command('approve_proposal', 'Approve a multisig proposal as a member')
-    .option('--keypair <path>', 'Path to member keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
-    .option('--multisig <address>', 'Multisig account address')
-    .option('--proposal <number>', 'Proposal number to approve')
-    .action(async (options) => {
+    .option('--multisig <address>', 'Multisig account address', { required: true })
+    .option('--proposal <number>', 'Proposal number to approve', { required: true })
+    .action(async (options, cmd) => {
         try {
-            if (!options.multisig) throw new Error('--multisig is required');
-            if (!options.proposal) throw new Error('--proposal is required');
-
             const multisigPubkey = new PublicKey(options.multisig);
             const proposalNumber = BigInt(options.proposal);
             const member = loadKeypair(options.keypair);
-            const connection = getDevnetConnection();
+            const connection = getConnection(options.rpc, options.commitment);
 
             console.log(chalk.blue('Member:'), member.publicKey.toBase58());
             console.log(chalk.blue('Multisig:'), multisigPubkey.toBase58());
@@ -462,19 +448,15 @@ cli
         }
     });
 
-// --- execute_proposal ---
+// ────────────────────────────────────────────────────────────
+// Command: execute_proposal
+// ────────────────────────────────────────────────────────────
 cli
     .command('execute_proposal', 'Execute an approved multisig proposal')
-    .option('--keypair <path>', 'Path to member keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
-    .option('--multisig <address>', 'Multisig account address')
-    .option('--proposal <number>', 'Proposal number (transaction index) to execute', { type: Number })
-    .action(async (options) => {
+    .option('--multisig <address>', 'Multisig account address', { required: true })
+    .option('--proposal <number>', 'Proposal number (transaction index) to execute', { type: Number, required: true })
+    .action(async (options, cmd) => {
         try {
-            if (!options.multisig) throw new Error('--multisig is required');
-            if (!options.proposal || options.proposal < 0) {
-                throw new Error('--proposal-number <number> is required (>= 0)');
-            }
-
             const multisigPubkey = new PublicKey(options.multisig);
             const proposalNumber = BigInt(options.proposal);
             const member = loadKeypair(options.keypair);
@@ -497,321 +479,198 @@ cli
         }
     });
 
-// --- create_private_transfer_proposal (BigInt-safe) ---
+// ────────────────────────────────────────────────────────────
+// Command: create_private_transfer_proposal
+// ────────────────────────────────────────────────────────────
 cli
     .command('create_private_transfer_proposal', 'Create a private Cloak transfer proposal (single or batch)')
-    .option('--keypair <path>', 'Path to creator keypair JSON', {
-        default: '/home/mubariz/.config/solana/id.json'
-    })
     .option('--multisig <address>', 'Multisig account address (base58)', { required: true })
-    .option('--mint <address>', 'asset address (base58)', { required: true })
-
-    // ✅ Array inputs: comma-separated values (all arrays must be same length)
+    .option('--mint <address>', 'Asset address (base58)', { required: true })
+    // Batch inputs
     .option('--commitments <values>', 'UTXO commitments (comma-separated, decimal or 0x hex)', { type: String })
     .option('--targets <pubkeys>', 'Recipient public keys (comma-separated, base58)', { type: String })
     .option('--amounts <values>', 'Amounts in lamports (comma-separated, decimal or 0x hex)', { type: String })
-
-    // ✅ Legacy single-value flags (for backward compatibility)
+    // Legacy single inputs
     .option('--commitment <value>', 'Single UTXO commitment (deprecated: use --commitments)', { type: String })
     .option('--target <pubkey>', 'Single recipient (deprecated: use --targets)', { type: String })
     .option('--amount <value>', 'Single amount (deprecated: use --amounts)', { type: String })
-
-    .option('--deadline <seconds>', 'Voting deadline in seconds (default: 86400 = 1 day)', { type: String })
-    .action(async (options) => {
+    .option('--deadline <seconds>', 'Voting deadline in seconds (default: 86400)', { type: String })
+    .action(async (options, cmd) => {
         try {
             console.log(chalk.yellow('🔐 Creating private transfer proposal...'));
 
-            // ────────────────────────────────────────────────────────
-            // 1. Parse inputs: support both single-value and batch modes
-            // ────────────────────────────────────────────────────────
-
-            // Check if using batch mode (new flags) or legacy mode (old flags)
             const isBatchMode = options.commitments || options.targets || options.amounts;
-
-            let commitments: bigint[];
-            let recipients: PublicKey[];
-            let amounts: bigint[];
+            let commitments: bigint[], recipients: PublicKey[], amounts: bigint[];
 
             if (isBatchMode) {
-                // ✅ BATCH MODE: parse comma-separated arrays
                 commitments = parseBigIntArray(options.commitments, 'commitments');
                 recipients = parsePublicKeyArray(options.targets, 'targets');
                 amounts = parseBigIntArray(options.amounts, 'amounts');
 
-                // Validate array lengths match
                 if (commitments.length !== recipients.length || commitments.length !== amounts.length) {
-                    throw new Error(
-                        `Array length mismatch: commitments=${commitments.length}, ` +
-                        `targets=${recipients.length}, amounts=${amounts.length}. ` +
-                        `All arrays must have the same length.`
-                    );
+                    throw new Error(`Array length mismatch. All arrays must have the same length.`);
                 }
-
-                if (commitments.length === 0) {
-                    throw new Error('At least one payout entry required');
-                }
-                if (commitments.length > 255) {
-                    throw new Error('Max 255 entries per proposal (Solana transaction size limit)');
-                }
-
+                if (commitments.length === 0) throw new Error('At least one payout entry required');
+                if (commitments.length > 255) throw new Error('Max 255 entries per proposal');
                 console.log(chalk.blue(`📦 Batch mode: ${commitments.length} payout entries`));
             } else {
-                // ✅ LEGACY MODE: single payout (backward compatible)
-                // Use rawArg for BigInt precision on commitment/amount
                 const commitmentStr = rawArg('--commitment');
                 const amountStr = rawArg('--amount');
-
-                if (!commitmentStr) throw new Error('--commitment is required (or use --commitments for batch)');
-                if (!amountStr) throw new Error('--amount is required (or use --amounts for batch)');
-                if (!options.target) throw new Error('--target is required (or use --targets for batch)');
-
+                if (!commitmentStr || !amountStr || !options.target) {
+                    throw new Error('--commitment, --amount, and --target are required for single payout');
+                }
                 commitments = [BigInt(commitmentStr)];
                 amounts = [BigInt(amountStr)];
                 recipients = [new PublicKey(options.target)];
-
                 console.log(chalk.blue('📦 Single payout mode'));
             }
 
-            // Parse other inputs
             const mint = new PublicKey(options.mint);
             const multisig = new PublicKey(options.multisig);
             const creator = loadKeypair(options.keypair);
-            const votingDeadlineSeconds = options.deadline
-                ? parseInt(options.deadline, 10)
-                : undefined;
+            const connection = getConnection(options.rpc, options.commitment);
+            const votingDeadlineSeconds = options.deadline ? parseInt(options.deadline, 10) : undefined;
 
-            // ────────────────────────────────────────────────────────
-            // 2. Log summary
-            // ────────────────────────────────────────────────────────
             console.log(chalk.blue('Creator:'), creator.publicKey.toBase58());
             console.log(chalk.blue('Multisig:'), multisig.toBase58());
             console.log(chalk.blue('Entries:'), commitments.length);
-
-            // Log first entry as preview
-            console.log(chalk.blue('Preview (entry 1):'));
-            console.log('  Commitment:', '0x' + commitments[0].toString(16).slice(0, 16) + '...');
-            console.log('  Amount:    ', amounts[0].toString(), 'lamports');
-            console.log('  Recipient: ', recipients[0].toBase58());
-
-            if (commitments.length > 1) {
-                console.log(chalk.dim(`  ...and ${commitments.length - 1} more entries`));
-            }
-
+            console.log(chalk.blue('Preview:'), {
+                commitment: '0x' + commitments[0].toString(16).slice(0, 16) + '...',
+                amount: amounts[0].toString(),
+                recipient: recipients[0].toBase58(),
+            });
             if (votingDeadlineSeconds) {
-                console.log(chalk.blue('Deadline:'), `${votingDeadlineSeconds}s (~${Math.floor(votingDeadlineSeconds / 3600)}h)`);
+                console.log(chalk.blue('Deadline:'), `${votingDeadlineSeconds}s`);
             }
-
             console.log(chalk.yellow('⏳ Creating proposal...'));
 
-            // ────────────────────────────────────────────────────────
-            // 3. Build entries array and call updated function
-            // ────────────────────────────────────────────────────────
             const entries = commitments.map((commitment, i) => ({
                 commitment,
                 amount: amounts[i],
                 recipient: recipients[i],
             }));
-            console.log(entries);
 
-            await createPrivateTransferProposal(
-                entries,
-                mint,
-                creator,
-                multisig,
-                new Connection('https://api.devnet.solana.com', 'confirmed'),
-                { votingDeadlineSeconds }
-            );
-
-            // ────────────────────────────────────────────────────────
-            // 4. Success output
-            // ────────────────────────────────────────────────────────
+            await createPrivateTransferProposal(entries, mint, creator, multisig, connection, { votingDeadlineSeconds });
             console.log(chalk.green('✅ Private proposal created!'));
-
 
         } catch (error: any) {
             console.error(chalk.red('❌ Proposal creation failed:'), error.message);
-
-            // Helpful hints for common errors
             if (error.message?.includes('Array length')) {
                 console.error('💡 Hint: All arrays (--commitments, --targets, --amounts) must have the same length');
-                console.error('💡 Example: --commitments "c1,c2,c3" --targets "pk1,pk2,pk3" --amounts "100,200,300"');
-            } else if (error.message?.includes('Invalid') && error.message?.includes('commitment')) {
-                console.error('💡 Hint: Commitments must be valid BigInt (decimal or 0x hex), comma-separated');
-            } else if (error.message?.includes('Invalid') && error.message?.includes('target')) {
-                console.error('💡 Hint: Targets must be valid base58 Solana pubkeys, comma-separated');
-            } else if (error.message?.includes('255')) {
-                console.error('💡 Hint: Max 255 entries per proposal due to Solana transaction size limits');
             }
-
-            if (error.logs && Array.isArray(error.logs)) {
-                console.error('📜 Program Logs:');
-                error.logs.forEach((log: string) => console.error('  ', log));
-            }
-
             process.exit(1);
         }
     });
-cli
-    .command('scan-compliance', 'Scan Cloak transaction history for compliance/auditing')
-    .option('--viewing-key <key>', 'Base58-encoded viewing key (nk, 32 bytes)', { required: true })
-    .option('--rpc <url>', 'Solana RPC URL', { default: 'https://devnet.helius-rpc.com/?api-key=64096058-650d-4e15-99cd-842c236765ef' })
-    .option('--limit <number>', 'Maximum transactions to scan', { type: Number })
-    .action(async (options) => {
-        try {
-            console.log(chalk.yellow('🔐 FortisX Compliance Scanner'));
-            console.log(chalk.dim('Scanning private Cloak transactions...'));
-            console.log();
-
-            // Build options object matching ScanComplianceOptions interface
-            const scanOptions: ScanComplianceOptions = {
-                viewingKey: options.viewingKey,
-                rpcUrl: options.rpc,
-                limit: options.limit,
-            };
-
-            // Execute scan
-            const result = await scanCompliance(scanOptions);
-
-            // Success exit
-            console.log(chalk.green('\n✨ Done.'));
-            process.exit(0);
-
-        } catch (error: any) {
-            console.error(chalk.red('\n❌ Scan failed.'));
-
-            // Provide helpful hints for common issues
-            if (error.message?.includes('32 bytes')) {
-                console.error('💡 Viewing key (nk) must be exactly 32 bytes.');
-                console.error('💡 Generate with: getNkFromUtxoPrivateKey(utxoPrivateKey)');
-            } else if (error.message?.includes('base58')) {
-                console.error('💡 Viewing key must be valid base58 encoding.');
-            } else if (error.message?.includes('not found')) {
-                console.error('💡 Check your --rpc URL and --program-id.');
-            } else if (error.message?.includes('timeout')) {
-                console.error('💡 RPC request timed out. Try a different endpoint or increase timeout.');
-            }
-
-            process.exit(1);
-        }
-    });
-
 
 // ────────────────────────────────────────────────────────────
-// CLI Command: create_private_swap_proposal
+// Command: create_private_swap_proposal
 // ────────────────────────────────────────────────────────────
 cli
     .command('create_private_swap_proposal', 'Create a private Cloak swap proposal (single swap)')
-    .option('--keypair <path>', 'Path to creator keypair JSON', {
-        default: '/home/mubariz/.config/solana/id.json'
-    })
     .option('--multisig <address>', 'Multisig account address (base58)', { required: true })
-
-    // Swap-specific inputs (single values only — no batch arrays)
-    .option('--commitment <value>', 'UTXO commitment to spend (decimal or 0x hex)', { type: String })
-    .option('--amount <value>', 'Amount to swap (input token units, decimal or 0x hex)', { type: String })
-    .option('--recipient-ata <pubkey>', "Recipient's ATA for OUTPUT token (base58)", { type: String })
-    .option('--target-mint <pubkey>', 'Mint of token being swapped TO (base58)', { type: String })
-    .option('--mint <pubkey>', 'Mint of source token (base58)', { type: String })
-
-    .option('--deadline <seconds>', 'Voting deadline in seconds (default: 86400 = 1 day)', { type: String })
-
-    .action(async (options) => {
+    .option('--commitment <value>', 'UTXO commitment to spend (decimal or 0x hex)', { type: String, required: true })
+    .option('--amount <value>', 'Amount to swap (input token units)', { type: String, required: true })
+    .option('--recipient-ata <pubkey>', "Recipient's ATA for OUTPUT token (base58)", { required: true })
+    .option('--target-mint <pubkey>', 'Mint of token being swapped TO (base58)', { required: true })
+    .option('--mint <pubkey>', 'Mint of source token (base58)', { required: true })
+    .option('--deadline <seconds>', 'Voting deadline in seconds (default: 86400)', { type: String })
+    .action(async (options, cmd) => {
         try {
             console.log(chalk.yellow('🔀 Creating private swap proposal...'));
 
-            // ────────────────────────────────────────────────────────
-            // 1. Parse inputs with BigInt precision (rawArg bypasses coercion)
-            // ────────────────────────────────────────────────────────
             const commitmentStr = rawArg('--commitment');
             const amountStr = rawArg('--amount');
-
-            if (!commitmentStr) throw new Error('--commitment is required');
-            if (!amountStr) throw new Error('--amount is required');
-            if (!options.recipientAta) throw new Error('--recipient-ata is required');
-            if (!options.targetMint) throw new Error('--target-mint is required');
-            if (!options.mint) throw new Error('--mint is required');
+            if (!commitmentStr || !amountStr) throw new Error('--commitment and --amount are required');
 
             const commitment = parseBigInt(commitmentStr);
             const amount = parseBigInt(amountStr);
             const recipientAta = new PublicKey(options.recipientAta);
             const targetMint = new PublicKey(options.targetMint);
-            const Mint = new PublicKey(options.mint);
+            const sourceMint = new PublicKey(options.mint);
             const multisig = new PublicKey(options.multisig);
             const creator = loadKeypair(options.keypair);
-            const votingDeadlineSeconds = options.deadline
-                ? parseInt(options.deadline, 10)
-                : undefined;
+            const connection = getConnection(options.rpc, options.commitment);
+            const votingDeadlineSeconds = options.deadline ? parseInt(options.deadline, 10) : undefined;
 
-            // ────────────────────────────────────────────────────────
-            // 2. Log summary
-            // ────────────────────────────────────────────────────────
             console.log(chalk.blue('Creator:'), creator.publicKey.toBase58());
             console.log(chalk.blue('Multisig:'), multisig.toBase58());
-            console.log(chalk.blue('Swap Details:'));
-            console.log('  Commitment:  ', '0x' + commitment.toString(16).slice(0, 16) + '...');
-            console.log('  Amount:      ', amount.toString(), 'input units');
-            console.log('  Recipient:   ', recipientAta.toBase58());
-            console.log('  Target Mint: ', targetMint.toBase58());
-
-            if (votingDeadlineSeconds) {
-                console.log(chalk.blue('Deadline:'), `${votingDeadlineSeconds}s (~${Math.floor(votingDeadlineSeconds / 3600)}h)`);
-            }
-
+            console.log(chalk.blue('Swap:'), {
+                commitment: '0x' + commitment.toString(16).slice(0, 16) + '...',
+                amount: amount.toString(),
+                sourceMint: sourceMint.toBase58(),
+                targetMint: targetMint.toBase58(),
+                recipientAta: recipientAta.toBase58(),
+            });
             console.log(chalk.yellow('⏳ Creating proposal...'));
 
-            // ────────────────────────────────────────────────────────
-            // 3. Build entry and call proposal function
-            // ────────────────────────────────────────────────────────
             const entry: SwapEntry = {
                 commitment,
-                mint: Mint,
+                mint: sourceMint,
                 amount,
                 recipientAta,
                 targetMint,
             };
 
-            const result = await createPrivateSwapProposal(
-                entry,
-                creator,
-                multisig,
-                new Connection('https://api.devnet.solana.com', 'confirmed'),
-                { votingDeadlineSeconds }
-            );
-
-            // ────────────────────────────────────────────────────────
-            // 4. Success output
-            // ────────────────────────────────────────────────────────
+            const result = await createPrivateSwapProposal(entry, creator, multisig, connection, { votingDeadlineSeconds });
             console.log(chalk.green('✅ Private swap proposal created!'));
-            console.log('Signature:      ', result.signature);
-            console.log('Transaction PDA:', result.transactionPda.toBase58());
-            console.log('Proposal PDA:   ', result.proposalPda.toBase58());
-            console.log('Tx Index:       ', result.nextTxIndex.toString());
-            console.log('Payload hash:   ', result.payloadHash.toString('hex'));
+            console.log('Proposal PDA:', result.proposalPda.toBase58());
+            console.log('Payload hash:', result.payloadHash.toString('hex'));
 
         } catch (error: any) {
             console.error(chalk.red('❌ Swap proposal creation failed:'), error.message);
-
-            // Helpful hints for common errors
-            if (error.message?.includes('commitment')) {
-                console.error('💡 Hint: Commitment must be valid BigInt (decimal or 0x hex)');
-            } else if (error.message?.includes('recipient-ata') || error.message?.includes('target-mint')) {
-                console.error('💡 Hint: Recipient ATA and target mint must be valid base58 Solana pubkeys');
-            } else if (error.message?.includes('Invalid') && error.message?.includes('amount')) {
-                console.error('💡 Hint: Amount must be valid BigInt (decimal or 0x hex)');
-            }
-
-            if (error.logs && Array.isArray(error.logs)) {
-                console.error('📜 Program Logs:');
-                error.logs.forEach((log: string) => console.error('  ', log));
-            }
-
             process.exit(1);
         }
     });
+
+// ────────────────────────────────────────────────────────────
+// Command: scan-compliance
+// ────────────────────────────────────────────────────────────
+cli
+    .command('scan-compliance', 'Scan Cloak transaction history for compliance/auditing')
+    .option('--viewing-key <key>', 'Base58-encoded viewing key (nk, 32 bytes)', { required: true })
+    .option('--limit <number>', 'Maximum transactions to scan', { type: Number })
+    .action(async (options, cmd) => {
+        try {
+            console.log(chalk.yellow('🔐 FortisX Compliance Scanner'));
+            console.log(chalk.dim('Scanning private Cloak transactions...'));
+
+            const scanOptions: ScanComplianceOptions = {
+                viewingKey: options.viewingKey,
+                rpcUrl: getRpcUrl(options.rpc),
+                limit: options.limit,
+            };
+
+            const result = await scanCompliance(scanOptions);
+            console.log(chalk.green('\n✨ Done.'));
+            process.exit(0);
+
+        } catch (error: any) {
+            console.error(chalk.red('\n❌ Scan failed:'), error.message);
+            if (error.message?.includes('32 bytes')) {
+                console.error('💡 Viewing key (nk) must be exactly 32 bytes.');
+            }
+            process.exit(1);
+        }
+    });
+
 // ────────────────────────────────────────────────────────────
 // Help & Version
 // ────────────────────────────────────────────────────────────
+cli.help((sections) => {
+    // Add environment variable info to help output
+    sections.push({
+        title: 'Environment Variables',
+        body: [
+            '  SOLANA_RPC_URL   Solana RPC endpoint (default: Helius devnet)',
+            '  KEYPAIR_PATH     Default path to signer keypair JSON',
+        ].join('\n'),
+    });
+    return sections;
+});
 
-cli.help();
-cli.version('1.0.0');
+cli.version('0.1.0');
+
+// ────────────────────────────────────────────────────────────
+// Run CLI
+// ────────────────────────────────────────────────────────────
 cli.parse();
