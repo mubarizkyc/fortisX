@@ -6,7 +6,6 @@ import {
     serializeUtxo,
     deserializeUtxo, getNkFromUtxoPrivateKey, deriveUtxoKeypairFromSpendKey, scanTransactions
 } from "@cloak.dev/sdk-devnet"; // Ensure correct import path
-
 import {
     Connection,
     Keypair,
@@ -16,21 +15,15 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 import bs58 from "bs58";
-
-// src/commands/cloakDeposit.ts
 export async function CloakDeposit(
     depositAmount: bigint,
     signer: Keypair,
     mint: string,
+    connection: Connection,
 ) {
     console.log("MINT: ", mint);
-    const connection = new Connection("https://api.devnet.solana.com", "confirmed");
-
     const utxoKeypair = await generateUtxoKeypair();
     const viewingKeyNk = getNkFromUtxoPrivateKey(utxoKeypair.privateKey);
-    //print viewing key for debugging
-    console.log(utxoKeypair.publicKey.toString());
-    console.log(viewingKeyNk.toString());
     const MINT = new PublicKey(mint);
     // 2. Create the output UTXO structure
     const output = await createUtxo(depositAmount, utxoKeypair, MINT);
@@ -57,7 +50,7 @@ export async function CloakDeposit(
 
     // Wait for indexing/leaf settlement
     console.log("Waiting for chain indexing...");
-    await new Promise(r => setTimeout(r, 1_000));
+    await new Promise(r => setTimeout(r, 1_00));
 
     if (!myNote) throw new Error("Transfer failed to create note");
 
@@ -69,7 +62,7 @@ export async function CloakDeposit(
 
     // --- FILE WRITING LOGIC ---
     try {
-        const logFileName = "my_utxo_logs.txt";
+        const logFileName = "cloak_deposits.txt";
         const filePath = path.join(process.cwd(), logFileName);
         const dataToAppend = `${base58String}\n`;
         fs.appendFileSync(filePath, dataToAppend, { encoding: 'utf-8' });

@@ -1,23 +1,18 @@
 import { PublicKey, TransactionInstruction, SystemProgram, Keypair, Transaction, Connection, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import chalk from 'chalk';
-import { PROGRAM_ID } from '../utils';
+import { PROGRAM_ID, SEED_PREFIX, SEED_VAULT } from '../utils';
 export async function publicDeposit(
     depositor: Keypair, // Use Legacy Keypair for simplicity with LiteSVM
     amountLamports: bigint,
-    assetAddress: PublicKey,
     multisigAddress: PublicKey // The base address of the multisig config
 ) {
     const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
-
-    const [vaultPda] = PublicKey.findProgramAddressSync(
-        [
-            Buffer.from('multisig'),
-            multisigAddress.toBytes(),
-            Buffer.from('vault')
-        ],
+    console.log("Multisig address: ", multisigAddress);
+    const [vaultPda, vaultBump] = PublicKey.findProgramAddressSync(
+        [SEED_PREFIX, multisigAddress.toBytes(), SEED_VAULT],
         PROGRAM_ID
     );
-    console.log(chalk.blue('Vault PDA:'), vaultPda.toBase58());
+    console.log(chalk.blue('Vault PDA:'), vaultPda);
     const ix = SystemProgram.transfer({
         fromPubkey: new PublicKey(depositor.publicKey),
         toPubkey: vaultPda,

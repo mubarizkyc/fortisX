@@ -14,8 +14,6 @@ import {
     VersionedTransaction
 } from '@solana/web3.js';
 import { SEED_MULTISIG, SEED_PREFIX, TREASURY, transactionMessageToMultisigTransactionMessageBytes, SEED_VAULT, SEED_TRANSACTION, SEED_PROPOSAL, PROGRAM_ID, DISCRIMINATOR_APPROVE_PROPOSAL, PROPOSAL_HEADER_SIZE, bigIntToLittleEndianBytes } from '../utils';
-import { CompiledKeys } from '../utils';
-import { transactionMessageBeet } from '../types';
 import { Buffer } from 'buffer';
 import bs58 from 'bs58';
 import { readFileSync } from 'fs';
@@ -25,8 +23,8 @@ export async function createTransferProposal(
     multisigAddress: PublicKey,
     transferTarget: PublicKey,
     amountLamports: bigint,
+    conn: Connection
 ) {
-    const conn = new Connection("https://api.devnet.solana.com", "confirmed");
 
     // 1. Fetch multisig account to get current transaction_index
     const multisigInfo = await conn.getAccountInfo(multisigAddress);

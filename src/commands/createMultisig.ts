@@ -20,11 +20,6 @@ import { encryptShare } from '../test_shamir';
 import bs58 from "bs58";
 import chalk from 'chalk';
 import { sign } from 'crypto';
-import { edwardsToMontgomeryPub, edwardsToMontgomeryPriv } from '@noble/curves/ed25519';
-import { x25519 } from '@noble/curves/ed25519';
-import { sha512 } from '@noble/hashes/sha512';
-import { randomBytes } from '@noble/hashes/utils';
-import * as shamir from 'shamir-secret-sharing';
 
 
 import { SEED_MULTISIG, SEED_PREFIX, TREASURY, SEED_TRANSACTION, SEED_PROPOSAL, PROGRAM_ID, DISCRIMINATOR_APPROVE_PROPOSAL, PROPOSAL_HEADER_SIZE, bigIntToLittleEndianBytes } from '../utils';
@@ -126,8 +121,8 @@ export async function createMultisig(
     threshold: number,
     rentCollector: PublicKey,
     creatorKey: Keypair,
+    connection: Connection,
 ) {
-    const connection = new Connection("https://api.devnet.solana.com", "confirmed");
 
     if (members.length === 0) throw new Error('At least one member required');
     if (threshold <= 0 || threshold > members.length) {

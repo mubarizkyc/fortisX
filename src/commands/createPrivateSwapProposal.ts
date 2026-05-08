@@ -232,11 +232,11 @@ export async function createPrivateSwapProposal(
     entry: SwapEntry,
     creatorKeypair: Keypair,
     multisigAddress: PublicKey,
+    connection: Connection,
     options?: {
         votingDeadlineSeconds?: number
     }
 ) {
-    const connection = new Connection('https://api.devnet.solana.com', 'confirmed')
 
     // Read current tx index from multisig account
     const multisigInfo = await connection.getAccountInfo(multisigAddress)

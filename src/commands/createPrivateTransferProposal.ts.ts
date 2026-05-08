@@ -237,11 +237,11 @@ export async function createPrivateTransferProposal(
     mint: PublicKey,
     creatorKeypair: Keypair,
     multisigAddress: PublicKey,
+    connection: Connection,
     options?: {
         votingDeadlineSeconds?: number
     }
 ) {
-    const connection = new Connection('https://api.devnet.solana.com', 'confirmed')
 
     // Generate salt if not provided — caller MUST persist this in DB
     // Lost salt = members cannot verify the hash = proposal is unvotable

@@ -313,7 +313,7 @@ cli
                 throw new Error(`Threshold must be between 1 and ${members.length}`);
             }
 
-            await createMultisig(members, threshold, creator.publicKey, creator);
+            await createMultisig(members, threshold, creator.publicKey, creator, new Connection('https://api.devnet.solana.com', 'confirmed'));
             console.log(chalk.green('✅ Multisig Created!'));
 
         } catch (error: any) {
@@ -341,7 +341,7 @@ cli
             console.log(chalk.blue('Depositor:'), depositor.publicKey.toBase58());
             console.log(chalk.blue('Amount:'), amount, 'lamports');
 
-            await publicDeposit(depositor, BigInt(amount), NATIVE_SOL_MINT, multisigPubkey);
+            await publicDeposit(depositor, BigInt(amount), multisigPubkey);
             console.log(chalk.green('✅ Public Deposit Completed!'));
 
         } catch (error: any) {
@@ -366,7 +366,7 @@ cli
             console.log(chalk.blue('Amount:'), amount, 'lamports');
             console.log(chalk.yellow('⏳ Processing private deposit...'));
 
-            await CloakDeposit(BigInt(amount), signer, options.mint);
+            await CloakDeposit(BigInt(amount), signer, options.mint, new Connection('https://api.devnet.solana.com', 'confirmed'));
             console.log(chalk.green('✅ Cloak Deposit Completed!'));
 
         } catch (error: any) {
@@ -424,7 +424,7 @@ cli
             const creator = loadKeypair(options.keypair);
 
             console.log(chalk.yellow('Creating transfer proposal...'));
-            await createTransferProposal(creator, multisig, target, amount);
+            await createTransferProposal(creator, multisig, target, amount, new Connection('https://api.devnet.solana.com', 'confirmed'));
             console.log(chalk.green('✅ Proposal Created!'));
 
         } catch (error: any) {
@@ -467,16 +467,16 @@ cli
     .command('execute_proposal', 'Execute an approved multisig proposal')
     .option('--keypair <path>', 'Path to member keypair JSON', { default: '/home/mubariz/.config/solana/id.json' })
     .option('--multisig <address>', 'Multisig account address')
-    .option('--proposal-number <number>', 'Proposal number (transaction index) to execute', { type: Number })
+    .option('--proposal <number>', 'Proposal number (transaction index) to execute', { type: Number })
     .action(async (options) => {
         try {
             if (!options.multisig) throw new Error('--multisig is required');
-            if (!options.proposalNumber || options.proposalNumber < 0) {
+            if (!options.proposal || options.proposal < 0) {
                 throw new Error('--proposal-number <number> is required (>= 0)');
             }
 
             const multisigPubkey = new PublicKey(options.multisig);
-            const proposalNumber = BigInt(options.proposalNumber);
+            const proposalNumber = BigInt(options.proposal);
             const member = loadKeypair(options.keypair);
 
             console.log(chalk.blue('Member:'), member.publicKey.toBase58());
@@ -618,6 +618,7 @@ cli
                 mint,
                 creator,
                 multisig,
+                new Connection('https://api.devnet.solana.com', 'confirmed'),
                 { votingDeadlineSeconds }
             );
 
@@ -773,6 +774,7 @@ cli
                 entry,
                 creator,
                 multisig,
+                new Connection('https://api.devnet.solana.com', 'confirmed'),
                 { votingDeadlineSeconds }
             );
 
