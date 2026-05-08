@@ -16,7 +16,9 @@ import { createTransferProposal } from './commands/createTransferProposal';
 import { approveProposal } from './commands/approveProposal';
 import { executeProposal } from './commands/executeProposal';
 import { createPrivateTransferProposal } from './commands/createPrivateTransferProposal.ts';
+import { createPrivateSwapProposal } from './commands/createPrivateSwapProposal';
 import { fetchAndDecryptShare } from './shareCrypto';
+import { SwapEntry } from './commands/createPrivateSwapProposal';
 function rawArg(flag: string): string | undefined {
     const idx = process.argv.indexOf(flag)
     return idx !== -1 ? process.argv[idx + 1] : undefined
@@ -108,7 +110,7 @@ function loadKeypair(keypairPath: string): Keypair {
  * Default Devnet connection
  */
 function getDevnetConnection(): Connection {
-    return new Connection('https://api.devnet.solana.com', 'confirmed');
+    return new Connection('https://devnet.helius-rpc.com/?api-key=64096058-650d-4e15-99cd-842c236765ef');
 }
 
 // ────────────────────────────────────────────────────────────
@@ -126,7 +128,8 @@ cli
     })
     .option('--multisig <address>', 'Multisig account address (base58)')
     .option('--collector-url <url>', 'Share collector endpoint', {
-        default: 'https://localhost:3456/api/submit-share'
+        // Change https → http for local development
+        default: 'http://localhost:3456/api/submit-share'
     })
     .option('--insecure', 'Allow self-signed HTTPS certificates (for local testing)', { default: false })
     .option('--timeout <ms>', 'Request timeout in milliseconds', { type: Number, default: 30000 })
@@ -235,8 +238,6 @@ cli
     .option('--dao-db <path>', 'Path to local DAO UTXO database JSON', {
         default: './dao_utxo_db.json'
     })
-    // Optional: Override hardcoded treasury private key for testing
-    .option('--treasury-key <value>', 'Treasury private key (bigint, for testing)', { type: String })
     // Optional: Cloak program ID override
     .option('--cloak-program <address>', 'Cloak program ID (base58)')
     .action(async (options) => {
@@ -250,15 +251,8 @@ cli
             const proposalNumber = parseBigInt(options.proposalNumber);
             const creator = loadKeypair(options.keypair);
 
-            // Optional: parse treasury private key if provided
-            const treasuryPrivateKey = options.treasuryKey
-                ? parseBigInt(options.treasuryKey)
-                : undefined;
 
-            // Optional: parse Cloak program ID if provided
-            const cloakProgramId = options.cloakProgram
-                ? new PublicKey(options.cloakProgram)
-                : undefined;
+
 
             console.log(chalk.blue('Executing Member:'), creator.publicKey.toBase58());
             console.log(chalk.blue('Multisig:'), multisig.toBase58());
@@ -272,10 +266,12 @@ cli
                 multisig,
                 proposalNumber,
                 {
-                    treasuryPrivateKey, // undefined = use hardcoded default
-                    cloakProgramId,
+
                 }
             );
+            //1 000 000 0
+            //1 000 000 0
+            //1 000 000 000
 
         } catch (error: any) {
             console.error(chalk.red('❌ Execution Failed:'), error.message);
@@ -692,6 +688,119 @@ cli
                 console.error('💡 Check your --rpc URL and --program-id.');
             } else if (error.message?.includes('timeout')) {
                 console.error('💡 RPC request timed out. Try a different endpoint or increase timeout.');
+            }
+
+            process.exit(1);
+        }
+    });
+
+
+// ────────────────────────────────────────────────────────────
+// CLI Command: create_private_swap_proposal
+// ────────────────────────────────────────────────────────────
+cli
+    .command('create_private_swap_proposal', 'Create a private Cloak swap proposal (single swap)')
+    .option('--keypair <path>', 'Path to creator keypair JSON', {
+        default: '/home/mubariz/.config/solana/id.json'
+    })
+    .option('--multisig <address>', 'Multisig account address (base58)', { required: true })
+
+    // Swap-specific inputs (single values only — no batch arrays)
+    .option('--commitment <value>', 'UTXO commitment to spend (decimal or 0x hex)', { type: String })
+    .option('--amount <value>', 'Amount to swap (input token units, decimal or 0x hex)', { type: String })
+    .option('--recipient-ata <pubkey>', "Recipient's ATA for OUTPUT token (base58)", { type: String })
+    .option('--target-mint <pubkey>', 'Mint of token being swapped TO (base58)', { type: String })
+    .option('--mint <pubkey>', 'Mint of source token (base58)', { type: String })
+
+    .option('--deadline <seconds>', 'Voting deadline in seconds (default: 86400 = 1 day)', { type: String })
+
+    .action(async (options) => {
+        try {
+            console.log(chalk.yellow('🔀 Creating private swap proposal...'));
+
+            // ────────────────────────────────────────────────────────
+            // 1. Parse inputs with BigInt precision (rawArg bypasses coercion)
+            // ────────────────────────────────────────────────────────
+            const commitmentStr = rawArg('--commitment');
+            const amountStr = rawArg('--amount');
+
+            if (!commitmentStr) throw new Error('--commitment is required');
+            if (!amountStr) throw new Error('--amount is required');
+            if (!options.recipientAta) throw new Error('--recipient-ata is required');
+            if (!options.targetMint) throw new Error('--target-mint is required');
+            if (!options.mint) throw new Error('--mint is required');
+
+            const commitment = parseBigInt(commitmentStr);
+            const amount = parseBigInt(amountStr);
+            const recipientAta = new PublicKey(options.recipientAta);
+            const targetMint = new PublicKey(options.targetMint);
+            const Mint = new PublicKey(options.mint);
+            const multisig = new PublicKey(options.multisig);
+            const creator = loadKeypair(options.keypair);
+            const votingDeadlineSeconds = options.deadline
+                ? parseInt(options.deadline, 10)
+                : undefined;
+
+            // ────────────────────────────────────────────────────────
+            // 2. Log summary
+            // ────────────────────────────────────────────────────────
+            console.log(chalk.blue('Creator:'), creator.publicKey.toBase58());
+            console.log(chalk.blue('Multisig:'), multisig.toBase58());
+            console.log(chalk.blue('Swap Details:'));
+            console.log('  Commitment:  ', '0x' + commitment.toString(16).slice(0, 16) + '...');
+            console.log('  Amount:      ', amount.toString(), 'input units');
+            console.log('  Recipient:   ', recipientAta.toBase58());
+            console.log('  Target Mint: ', targetMint.toBase58());
+
+            if (votingDeadlineSeconds) {
+                console.log(chalk.blue('Deadline:'), `${votingDeadlineSeconds}s (~${Math.floor(votingDeadlineSeconds / 3600)}h)`);
+            }
+
+            console.log(chalk.yellow('⏳ Creating proposal...'));
+
+            // ────────────────────────────────────────────────────────
+            // 3. Build entry and call proposal function
+            // ────────────────────────────────────────────────────────
+            const entry: SwapEntry = {
+                commitment,
+                mint: Mint,
+                amount,
+                recipientAta,
+                targetMint,
+            };
+
+            const result = await createPrivateSwapProposal(
+                entry,
+                creator,
+                multisig,
+                { votingDeadlineSeconds }
+            );
+
+            // ────────────────────────────────────────────────────────
+            // 4. Success output
+            // ────────────────────────────────────────────────────────
+            console.log(chalk.green('✅ Private swap proposal created!'));
+            console.log('Signature:      ', result.signature);
+            console.log('Transaction PDA:', result.transactionPda.toBase58());
+            console.log('Proposal PDA:   ', result.proposalPda.toBase58());
+            console.log('Tx Index:       ', result.nextTxIndex.toString());
+            console.log('Payload hash:   ', result.payloadHash.toString('hex'));
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Swap proposal creation failed:'), error.message);
+
+            // Helpful hints for common errors
+            if (error.message?.includes('commitment')) {
+                console.error('💡 Hint: Commitment must be valid BigInt (decimal or 0x hex)');
+            } else if (error.message?.includes('recipient-ata') || error.message?.includes('target-mint')) {
+                console.error('💡 Hint: Recipient ATA and target mint must be valid base58 Solana pubkeys');
+            } else if (error.message?.includes('Invalid') && error.message?.includes('amount')) {
+                console.error('💡 Hint: Amount must be valid BigInt (decimal or 0x hex)');
+            }
+
+            if (error.logs && Array.isArray(error.logs)) {
+                console.error('📜 Program Logs:');
+                error.logs.forEach((log: string) => console.error('  ', log));
             }
 
             process.exit(1);

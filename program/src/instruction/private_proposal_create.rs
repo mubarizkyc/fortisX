@@ -62,6 +62,11 @@ pub fn process_create_private_proposal(accounts: &[AccountInfo], data: &[u8]) ->
             .try_into()
             .map_err(|_| ProgramError::InvalidInstructionData)?,
     );
+    /*
+    0 -> public proposal
+    1 -> private transfer proposal
+    2 -> private swap proposal
+     */
     let proposal_type = data[8];
     let payload_hash = &data[9..41]; // 32 bytes, client computed Blake3
 

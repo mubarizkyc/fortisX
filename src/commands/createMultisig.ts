@@ -16,9 +16,17 @@ import {
     TransactionMessage,
     VersionedTransaction
 } from '@solana/web3.js'
+import { encryptShare } from '../test_shamir';
 import bs58 from "bs58";
 import chalk from 'chalk';
 import { sign } from 'crypto';
+import { edwardsToMontgomeryPub, edwardsToMontgomeryPriv } from '@noble/curves/ed25519';
+import { x25519 } from '@noble/curves/ed25519';
+import { sha512 } from '@noble/hashes/sha512';
+import { randomBytes } from '@noble/hashes/utils';
+import * as shamir from 'shamir-secret-sharing';
+
+
 import { SEED_MULTISIG, SEED_PREFIX, TREASURY, SEED_TRANSACTION, SEED_PROPOSAL, PROGRAM_ID, DISCRIMINATOR_APPROVE_PROPOSAL, PROPOSAL_HEADER_SIZE, bigIntToLittleEndianBytes } from '../utils';
 // ─── constants ───────────────────────────────────────────
 // shares are secretLen+1 bytes (33 for 32-byte secret)
@@ -27,38 +35,8 @@ export const SHARE_RAW_SIZE = 33
 export const SHARE_CIPHERTEXT_SIZE = 32 + 24 + SHARE_RAW_SIZE + 16  // 105
 export const ENCRYPTED_SHARE_SIZE = 32 + SHARE_CIPHERTEXT_SIZE  // member pubkey + ciphertext
 import { combine } from 'shamir-secret-sharing';
-import { decryptShareFromMember } from '../shareCrypto';
-// ─── verify round-trip before sending to chain ───────────
-export async function verifyShareRoundTrip(
-    treasuryKp: { privateKey: bigint; publicKey: bigint },
-    shares: Uint8Array[],
-    members: PublicKey[],
-    memberSecretKey: Uint8Array,  // one keypair for testing
-) {
-    console.log('--- Round-trip debug ---')
-    console.log('Secret key length:', memberSecretKey.length)
+//import { decryptShareFromMember } from '../shareCrypto';
 
-    // encrypt share 0
-    const enc = encryptShareForMember(shares[0], members[0])
-    console.log('Encrypted length:', enc.length)
-
-    // try decrypt with full 64 bytes
-    try {
-        const x25519Full = convertSecretKey(memberSecretKey)
-        console.log('x25519 from full 64 bytes:', Buffer.from(x25519Full).toString('hex').slice(0, 16))
-    } catch (e) { console.log('full 64 failed:', e) }
-
-    // try decrypt with first 32 bytes (seed only)
-    try {
-        const x25519Seed = convertSecretKey(memberSecretKey.slice(0, 32))
-        console.log('x25519 from seed 32 bytes:', Buffer.from(x25519Seed).toString('hex').slice(0, 16))
-    } catch (e) { console.log('seed 32 failed:', e) }
-
-    // check encrypt used same conversion
-    const encPubkey = encryptShareForMember(shares[0], members[0])
-    const memberX25519Pub = convertPublicKey(members[0].toBytes())
-    console.log('x25519 pubkey from ed25519:', Buffer.from(memberX25519Pub!).toString('hex').slice(0, 16))
-}
 export class CreateMultisigIxData {
     discriminator: number;        // 1 byte (u8)
     threshold: number;            // 2 bytes (u16 LE)
@@ -66,7 +44,7 @@ export class CreateMultisigIxData {
     members: PublicKey[];         // 4 bytes (u32 len) + N*32 bytes
     encryptedShares: {
         member: PublicKey;
-        ciphertext: Uint8Array;   // Fixed 105 bytes (no length prefix)
+        ciphertext: Uint8Array;   // Fixed 105 bytes
     }[];
     treasuryUtxoPubkey: Uint8Array; // 32 bytes
 
@@ -89,85 +67,50 @@ export class CreateMultisigIxData {
         // 1. Discriminator (1 byte)
         const discriminatorBuf = Buffer.from([this.discriminator]);
 
-        // 2. Threshold (2 bytes, u16 LE)
+        // 2. Threshold (2 bytes)
         const thresholdBuf = Buffer.alloc(2);
         thresholdBuf.writeUInt16LE(this.threshold);
 
-        // 3. Rent collector (32 bytes)
-        const rentCollectorBuf = this.rentCollector.toBytes();
+        // 3. Rent Collector (32 bytes)
+        const rentCollectorBuf = Buffer.from(this.rentCollector.toBytes());
 
-        // 4. Members array: [u32 len][pubkey1][pubkey2]...
+        // 4. Members
         const membersLenBuf = Buffer.alloc(4);
         membersLenBuf.writeUInt32LE(this.members.length);
-        const membersBytes = Buffer.concat(this.members.map(m => m.toBytes()));
+        const membersBytes = Buffer.concat(this.members.map(m => Buffer.from(m.toBytes())));
 
-        // 5. Encrypted shares array: [u32 len][share1][share2]...
-        // Each share: [32 member pubkey][105 encrypted share] = 137 bytes
+        // 5. Shares
         const sharesLenBuf = Buffer.alloc(4);
         sharesLenBuf.writeUInt32LE(this.encryptedShares.length);
 
-        // In CreateMultisigIxData.serialize():
         const sharesBytes = Buffer.concat(
             this.encryptedShares.map(({ member, ciphertext }) => {
-                // ✅ Validate ciphertext is exactly 105 bytes (NaCl box output)
                 if (ciphertext.length !== 105) {
-                    throw new Error(
-                        `Invalid ciphertext length: expected 105, got ${ciphertext.length}. ` +
-                        `Ensure encryptShareForMember returns standard NaCl box output.`
-                    );
+                    throw new Error(`Ciphertext length mismatch: ${ciphertext.length}`);
                 }
-                // ✅ Format: [32 member pubkey][105 ciphertext] - NO length prefix
+                // [32 Pubkey][105 Ciphertext] = 137 bytes
                 return Buffer.concat([
-                    member.toBytes(),           // 32 bytes
-                    Buffer.from(ciphertext),    // 105 bytes (fixed)
+                    Buffer.from(member.toBytes()),
+                    Buffer.from(ciphertext)
                 ]);
             })
         );
 
-        // 6. Treasury UTXO public key (32 bytes)
+        // 6. Treasury Pubkey
         const treasuryPubkeyBuf = Buffer.from(this.treasuryUtxoPubkey);
 
-        // Concatenate all parts
         return Buffer.concat([
-            discriminatorBuf,      // 1
-            thresholdBuf,          // 2
-            rentCollectorBuf,      // 32
-            membersLenBuf,         // 4
-            membersBytes,          // N*32
-            sharesLenBuf,          // 4
-            sharesBytes,           // M*136
-            treasuryPubkeyBuf,     // 32
+            discriminatorBuf,
+            thresholdBuf,
+            rentCollectorBuf,
+            membersLenBuf,
+            membersBytes,
+            sharesLenBuf,
+            sharesBytes,
+            treasuryPubkeyBuf,
         ]);
     }
 }
-
-// ─── encrypt ─────────────────────────────────────────────
-function encryptShareForMember(
-    share: Uint8Array,       // 33 bytes from shamir split
-    memberPubkey: PublicKey,
-): Uint8Array {
-    // ✅ NO truncation — pass full share bytes including x-coordinate
-    if (share.length !== SHARE_RAW_SIZE) {
-        throw new Error(`Share must be ${SHARE_RAW_SIZE} bytes, got ${share.length}`)
-    }
-
-    const memberX25519 = convertPublicKey(memberPubkey.toBytes())
-    if (!memberX25519) throw new Error(`Cannot convert pubkey ${memberPubkey.toBase58()}`)
-
-    const ephemeral = nacl.box.keyPair()
-    const nonce = nacl.randomBytes(nacl.box.nonceLength)  // 24 bytes
-    const ciphertext = nacl.box(share, nonce, memberX25519, ephemeral.secretKey)
-    // ciphertext = 33 + 16 = 49 bytes
-
-    // [32 ephemeral][24 nonce][49 ciphertext] = 105 bytes
-    const result = new Uint8Array(32 + 24 + ciphertext.length)
-    result.set(ephemeral.publicKey, 0)
-    result.set(nonce, 32)
-    result.set(ciphertext, 56)
-
-    return result
-}
-
 
 export function bytes32ToBigint(bytes: Uint8Array): bigint {
     if (bytes.length !== 32) throw new Error(`Expected 32 bytes, got ${bytes.length}`)
@@ -218,22 +161,22 @@ export async function createMultisig(
         console.log(`Share ${i}: length = ${share.length} bytes`);
         console.log(`  First 8 bytes (hex): ${share.slice(0, 8).toString()}`);
     });
-    // quick sanity check — add to createMultisig before encrypting
-    const testSeed = creatorKey.secretKey.slice(0, 32)
-    const x25519FromSecret = convertSecretKey(testSeed)
-    const x25519PubFromSecret = nacl.box.keyPair.fromSecretKey(x25519FromSecret).publicKey
-    const x25519PubFromPubkey = convertPublicKey(creatorKey.publicKey.toBytes())
 
-    console.log('x25519 pub from secret:', Buffer.from(x25519PubFromSecret).toString('hex').slice(0, 16))
-    console.log('x25519 pub from pubkey:', Buffer.from(x25519PubFromPubkey!).toString('hex').slice(0, 16))
-    console.log('Match:', Buffer.from(x25519PubFromSecret).toString('hex') === Buffer.from(x25519PubFromPubkey!).toString('hex'))
-    const encryptedShares = members.map((member, i) => {
-        const encrypted = encryptShareForMember(shares[i], member);
+
+    const encryptedSharesPromises = members.map(async (member, i) => {
+        // 2. Await the async encryption function
+        const encrypted = await encryptShare(shares[i], member);
+
+        // 3. Now 'encrypted' is Uint8Array, so .length works
         console.log(`Encrypted share ${i}: ${encrypted.length} bytes`);
+
         return { member, ciphertext: encrypted };
     });
+    // 4. Wait for ALL promises to resolve
+    const encryptedShares = await Promise.all(encryptedSharesPromises);
 
     // 4. Derive multisig PDA
+
     const [multisigPda] = PublicKey.findProgramAddressSync(
         [SEED_PREFIX, SEED_MULTISIG, creatorKey.publicKey.toBytes()],
         PROGRAM_ID
@@ -282,7 +225,7 @@ export async function createMultisig(
 
     // 9. Send transaction
     console.log(chalk.yellow('Sending multisig creation transaction...'));
-    await verifyShareRoundTrip(treasuryKp, shares, members, members.map(m => creatorKey.secretKey))
+
     // only wipe after verification passes
     treasuryPkBytes.fill(0)
     shares.forEach(s => s.fill(0))

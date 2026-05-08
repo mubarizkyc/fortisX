@@ -16,17 +16,12 @@ import {
     bigIntToLittleEndianBytes,
 } from '../utils'
 import { writeFile, readFile } from 'fs/promises';
-import { join } from 'path';
 import { blake3 } from '@noble/hashes/blake3';
+import { DISCRIMINATOR_CREATE_PRIVATE_PROPOSAL } from './createPrivateTransferProposal.ts';
 
 // Domain separation constant — prevents hash collisions across different use cases
 const PAYLOAD_HASH_DOMAIN = new TextEncoder().encode('fortisx-payload-hash-v1');
-
-// ────────────────────────────────────────────────────────────
-// Constants — must match Rust exactly
-// ────────────────────────────────────────────────────────────
-export const DISCRIMINATOR_CREATE_PRIVATE_PROPOSAL = 5
-export const PROPOSAL_TRANSFER_PROPOSAL = 1
+export const PROPOSAL_SWAP_PROPOSAL = 2
 
 // Instruction layout (after router strips disc byte, Rust sees):
 // [0..8)  voting_deadline (i64 LE)
@@ -44,60 +39,64 @@ const IX_SIZE = 1 + 8 + 1 + 32 // 42 bytes, fixed always
 // Types
 // ────────────────────────────────────────────────────────────
 
-// Lives only in your DB — never goes on-chain
-export interface MultiPayoutEntry {
-    commitment: bigint
-    amount: bigint
-    recipient: PublicKey
+// Single swap entry — lives only in your DB, never goes on-chain
+export interface SwapEntry {
+    commitment: bigint        // UTXO commitment to spend (shielded input)
+    mint: PublicKey,
+    amount: bigint            // Amount to swap (in input token units)
+    recipientAta: PublicKey   // Recipient's ATA for OUTPUT token
+    targetMint: PublicKey     // Mint of the token being swapped TO (e.g., USDC)
 }
 
-export interface PrivateTransferProposalAccounts {
+export interface PrivateSwapProposalAccounts {
     multisig: PublicKey
     creator: PublicKey
 }
 
-export interface PrivateTransferProposalArgs {
+export interface PrivateSwapProposalArgs {
     currentTxIndex: bigint
-    mint: PublicKey
-    entries: MultiPayoutEntry[]
+    entry: SwapEntry          // Single entry (no array)
     salt: bigint
     votingDeadlineSeconds?: number
 }
-export interface ProposalDbRecord {
+
+// DB record — for audit/history, never on-chain
+export interface SwapProposalDbRecord {
     txIndex: string;
     multisig: string;           // base58
     salt: string;               // bigint as string
     payloadHash: string;        // hex
-    mint: string;               // base58
-    entries: Array<{
+    entry: {
         commitment: string;     // bigint as string
+        mint: String,
         amount: string;         // bigint as string
-        recipient: string;      // base58
-    }>;
+        recipientAta: string;   // base58
+        targetMint: string;     // base58
+    };
     createdAt?: string;         // ISO timestamp (added automatically)
 }
 
 // ────────────────────────────────────────────────────────────
 // Hash — preimage never touches the chain
 //
-// Blake3( JSON({ mint, salt, entries }) )
+// Blake3( JSON({ entry: { commitment, amount, recipientAta, targetMint }, salt }) )
 // Deterministic: bigints as strings, fields in fixed order.
 // Members fetch payload from DB, recompute, compare to on-chain hash.
 // ────────────────────────────────────────────────────────────
 export function buildPayloadHash(
-    mint: PublicKey,
+    entry: SwapEntry,
     salt: bigint,
-    entries: MultiPayoutEntry[],
 ): Buffer {
     // 1. Build deterministic JSON payload (same structure as Rust)
     const payload = {
-        mint: mint.toBase58(),
+        entry: {
+            commitment: entry.commitment.toString(),
+            mint: entry.mint.toString(),
+            amount: entry.amount.toString(),
+            recipientAta: entry.recipientAta.toBase58(),
+            targetMint: entry.targetMint.toBase58(),
+        },
         salt: salt.toString(),
-        entries: entries.map(e => ({
-            commitment: e.commitment.toString(),
-            amount: e.amount.toString(),
-            recipient: e.recipient.toBase58(),
-        })),
     };
 
     // 2. Encode payload to UTF-8 bytes
@@ -117,24 +116,24 @@ export function buildPayloadHash(
 
 // Members call this before casting their vote
 export function verifyPayloadHash(
-    mint: PublicKey,
+    entry: SwapEntry,
     salt: bigint,
-    entries: MultiPayoutEntry[],
     onChainHash: Buffer,
 ): boolean {
-    return buildPayloadHash(mint, salt, entries).equals(onChainHash)
+    return buildPayloadHash(entry, salt).equals(onChainHash)
 }
-export async function appendProposalRecord(
-    record: ProposalDbRecord,
-    filePath: string = './proposal_history.json'
+
+export async function appendSwapProposalRecord(
+    record: SwapProposalDbRecord,
+    filePath: string = './swap_proposal_history.json'
 ): Promise<void> {
     // Add timestamp for auditability
-    const recordWithTimestamp: ProposalDbRecord & { createdAt: string } = {
+    const recordWithTimestamp: SwapProposalDbRecord & { createdAt: string } = {
         ...record,
         createdAt: new Date().toISOString(),
     };
 
-    let records: (ProposalDbRecord & { createdAt: string })[] = [];
+    let records: (SwapProposalDbRecord & { createdAt: string })[] = [];
 
     // Read existing file if it exists
     try {
@@ -147,7 +146,6 @@ export async function appendProposalRecord(
         }
     } catch (err: any) {
         if (err.code !== 'ENOENT') {
-            // Re-throw if it's not a "file not found" error
             throw new Error(`Failed to read ${filePath}: ${err.message}`);
         }
         // File doesn't exist — start fresh
@@ -161,11 +159,11 @@ export async function appendProposalRecord(
 }
 
 // ────────────────────────────────────────────────────────────
-// Instruction builder — 42 bytes, fixed, no loops, no entries
+// Instruction builder — 42 bytes, fixed, no loops, no entries array
 // ────────────────────────────────────────────────────────────
-export function buildPrivateTransferProposalIx(
-    accounts: PrivateTransferProposalAccounts,
-    args: PrivateTransferProposalArgs,
+export function buildPrivateSwapProposalIx(
+    accounts: PrivateSwapProposalAccounts,
+    args: PrivateSwapProposalArgs,
 ): {
     ix: TransactionInstruction
     transactionPda: PublicKey
@@ -173,8 +171,6 @@ export function buildPrivateTransferProposalIx(
     nextTxIndex: bigint
     payloadHash: Buffer
 } {
-    if (args.entries.length === 0) throw new Error('At least one payout entry required')
-
     const nextTxIndex = args.currentTxIndex + 1n
     const nextTxIndexBytes = bigIntToLittleEndianBytes(nextTxIndex, 8)
     const deadlineSecs = BigInt(
@@ -192,7 +188,7 @@ export function buildPrivateTransferProposalIx(
     )
 
     // Compute hash — preimage stays in memory, never written to buf
-    const payloadHash = buildPayloadHash(args.mint, args.salt, args.entries)
+    const payloadHash = buildPayloadHash(args.entry, args.salt)
 
     // 42-byte fixed instruction buffer
     const buf = Buffer.alloc(IX_SIZE)
@@ -204,10 +200,10 @@ export function buildPrivateTransferProposalIx(
     // [1..9) voting_deadline (i64 LE)
     buf.writeBigInt64LE(deadlineSecs, offset); offset += 8
 
-    // [9] proposal_type
-    buf.writeUInt8(PROPOSAL_TRANSFER_PROPOSAL, offset); offset += 1
+    // [9] proposal_type (private)
+    buf.writeUInt8(PROPOSAL_SWAP_PROPOSAL, offset); offset += 1
 
-    // [10..42) payload_hash
+    // [10..42) payload_hash (32 bytes)
     buf.set(payloadHash, offset); offset += 32
 
     if (offset !== IX_SIZE) {
@@ -230,11 +226,10 @@ export function buildPrivateTransferProposalIx(
 }
 
 // ────────────────────────────────────────────────────────────
-// Main command
+// Main command: createPrivateSwapProposal
 // ────────────────────────────────────────────────────────────
-export async function createPrivateTransferProposal(
-    entries: MultiPayoutEntry[],
-    mint: PublicKey,
+export async function createPrivateSwapProposal(
+    entry: SwapEntry,
     creatorKeypair: Keypair,
     multisigAddress: PublicKey,
     options?: {
@@ -243,23 +238,27 @@ export async function createPrivateTransferProposal(
 ) {
     const connection = new Connection('https://api.devnet.solana.com', 'confirmed')
 
-    // Generate salt if not provided — caller MUST persist this in DB
-    // Lost salt = members cannot verify the hash = proposal is unvotable
-
-
     // Read current tx index from multisig account
-    // tx_index is u64 LE at offset 128 in your Multisig header
     const multisigInfo = await connection.getAccountInfo(multisigAddress)
     if (!multisigInfo) throw new Error(`Multisig not found: ${multisigAddress.toBase58()}`)
+
+    // tx_index is u64 LE at offset 128 in your Multisig header
     const currentTxIndex = multisigInfo.data.readBigUInt64LE(128)
+
+    // Use txIndex as salt (deterministic, unique per proposal)
     const salt = currentTxIndex;
-    console.log(chalk.blue('Current tx index:'), currentTxIndex.toString())
+    console.log(chalk.blue('Current tx index (used as salt):'), currentTxIndex.toString())
 
     // Build instruction
     const { ix, transactionPda, proposalPda, nextTxIndex, payloadHash } =
-        buildPrivateTransferProposalIx(
+        buildPrivateSwapProposalIx(
             { multisig: multisigAddress, creator: creatorKeypair.publicKey },
-            { currentTxIndex, entries, mint, salt, votingDeadlineSeconds: options?.votingDeadlineSeconds }
+            {
+                currentTxIndex,
+                entry,
+                salt,
+                votingDeadlineSeconds: options?.votingDeadlineSeconds
+            }
         )
 
     // Build + sign + send
@@ -273,7 +272,7 @@ export async function createPrivateTransferProposal(
     const tx = new VersionedTransaction(msg)
     tx.sign([creatorKeypair])
 
-    console.log(chalk.yellow('Sending private proposal to devnet...'))
+    console.log(chalk.yellow('Sending private swap proposal to devnet...'))
     const signature = await connection.sendTransaction(tx, {
         skipPreflight: false,
         maxRetries: 3,
@@ -286,26 +285,29 @@ export async function createPrivateTransferProposal(
     }
 
     // What you must write to your DB right now, before returning
-    const dbRecord = {
+    const dbRecord: SwapProposalDbRecord = {
         txIndex: nextTxIndex.toString(),
         multisig: multisigAddress.toBase58(),
         salt: salt.toString(),
         payloadHash: payloadHash.toString('hex'),
-        mint: mint.toBase58(),
-        entries: entries.map(e => ({
-            commitment: e.commitment.toString(),
-            amount: e.amount.toString(),
-            recipient: e.recipient.toBase58(),
-        })),
+        entry: {
+            commitment: entry.commitment.toString(),
+            mint: entry.mint.toString(),
+            amount: entry.amount.toString(),
+            recipientAta: entry.recipientAta.toBase58(),
+            targetMint: entry.targetMint.toBase58(),
+        },
     }
+
     try {
-        await appendProposalRecord(dbRecord);
-        console.log(chalk.green('📝 Proposal record saved to proposal_history.json'));
+        await appendSwapProposalRecord(dbRecord);
+        console.log(chalk.green('📝 Swap proposal record saved to swap_proposal_history.json'));
     } catch (err) {
-        console.error(chalk.red('⚠️  Failed to save proposal record:'), err);
+        console.error(chalk.red('⚠️  Failed to save swap proposal record:'), err);
         // Non-fatal — don't block the main flow
     }
-    console.log(chalk.green('✅ Private proposal created!'))
+
+    console.log(chalk.green('✅ Private swap proposal created!'))
     console.log('Signature:      ', signature)
     console.log('Transaction PDA:', transactionPda.toBase58())
     console.log('Proposal PDA:   ', proposalPda.toBase58())

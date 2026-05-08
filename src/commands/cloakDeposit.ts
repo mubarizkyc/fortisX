@@ -24,7 +24,6 @@ export async function CloakDeposit(
     mint: string,
 ) {
     console.log("MINT: ", mint);
-    console.log("native sol mint", NATIVE_SOL_MINT);
     const connection = new Connection("https://api.devnet.solana.com", "confirmed");
 
     const utxoKeypair = await generateUtxoKeypair();
