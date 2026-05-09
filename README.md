@@ -57,40 +57,73 @@ fortisX create_multisig --members "<pubkey1> <pubkey2> ..." --threshold <number>
 
 **Example**
 ```bash
-npx tsx src/index.ts create_multisig \
-  --members "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin 4vJ9JU1bJJE96FWSJKvHsmmFADCg4GPZQSgcvoEkmmER" \
+fortisX create_multisig \
+  --members "ap5oPFPVSnxtc8bbvcCeKwy9Xnu5NePhMGzX2hexDVh 44abtGibbueKQDXaw3PG9N1TrqhaF6RMao7jsW7QRC68" \
   --threshold 2
 ```
 
-| Flag | Description | Required |
+| Flag | Description |
 |---|---|---|
-| `--members <members>` | Space-separated list of member public keys (base58) | ✅ |
-| `--threshold <number>` | Number of required approvals | ✅ |
+| `--members <members>` | Space-separated list of member public keys (base58) |
+| `--threshold <number>` | Number of required approvals |
+
+**Descreption**
+Creates a new multisig account and stores the member list, threshold, and UTXO public key on-chain. The UTXO private key is split via Shamir Secret Sharing; each share is encrypted with the respective member's public key and stored on-chain.
 
 ---
 
 ### `public_deposit`
-Deposit SOL (in lamports) into the multisig public treasury.
+Deposit asset into the multisig public treasury.
 
 **Usage**
 ```
-npx tsx src/index.ts public_deposit --multisig <address> --amount <lamports> [--keypair <path>]
+fortisX public_deposit --multisig <address> --amount <lamports> 
 ```
 
 **Example**
 ```bash
-npx tsx src/index.ts public_deposit \
-  --multisig 9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin \
-  --amount 1000000000
+fortisX public_deposit \
+  --multisig  BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --amount 10000000
 ```
 
-| Flag | Description | Default |
+| Flag | Description |
 |---|---|---|
-| `--keypair <path>` | Path to depositor keypair JSON | `~/.config/solana/id.json` |
-| `--multisig <address>` | Multisig account address (base58) | ✅ Required |
-| `--amount <lamports>` | Amount to deposit in lamports | ✅ Required |
+| `--multisig <address>` | Multisig account address (base58) |
+| `--amount <lamports>` | Amount to deposit in lamports |
+
+**Descreption**
+Deposits into the public treasury (multisig PDA). This commands support SOL; SPL &
+Token-2022 tokens can also be deposited by creating an ATA.
 
 ---
+
+### `create_transfer_proposal`
+Create a **public** SOL transfer proposal for multisig approval.
+
+**Usage**
+```
+fortisX create_transfer_proposal --multisig <address> --target <address> --amount <lamports>
+```
+
+**Example**
+```bash
+fortisX create_transfer_proposal \
+  --multisig  BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --target ap5oPFPVSnxtc8bbvcCeKwy9Xnu5NePhMGzX2hexDVh \
+  --amount 10000000
+```
+
+| Flag | Description 
+|---|---|
+| `--multisig <address>` | Multisig account address (base58) |
+| `--target <address>` | Transfer recipient address (base58) |
+| `--amount <lamports>` | Amount in lamports |
+
+**Descreption**
+This command creates a proposal for a native transfer. FortisX supports all tx types (token transfers, loans, swaps, upgrades, etc.). You just pass the transaction message as a Base58 string; FortisX stores it on-chain and executes it by invoking the target program.
+---
+
 
 ### `cloak_deposit`
 Deposit SOL into the **Cloak Protocol** to mint a private UTXO.
@@ -137,31 +170,6 @@ npx tsx src/index.ts private_deposit \
 | `--treasury-id <id>` | Treasury ID (BigInt) to deposit into | ✅ Required |
 | `--utxo <base58>` | Your existing private UTXO (Base58) to spend | ✅ Required |
 | `--amount <lamports>` | Amount to transfer in lamports | ✅ Required |
-
----
-
-### `create_transfer_proposal`
-Create a **public** SOL transfer proposal for multisig approval.
-
-**Usage**
-```
-npx tsx src/index.ts create_transfer_proposal --multisig <address> --target <address> --amount <lamports> [--keypair <path>]
-```
-
-**Example**
-```bash
-npx tsx src/index.ts create_transfer_proposal \
-  --multisig 9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin \
-  --target 4vJ9JU1bJJE96FWSJKvHsmmFADCg4GPZQSgcvoEkmmER \
-  --amount 500000000
-```
-
-| Flag | Description | Default |
-|---|---|---|
-| `--keypair <path>` | Path to creator keypair JSON | `~/.config/solana/id.json` |
-| `--multisig <address>` | Multisig account address (base58) | ✅ Required |
-| `--target <address>` | Transfer recipient address (base58) | ✅ Required |
-| `--amount <lamports>` | Amount in lamports | ✅ Required |
 
 ---
 

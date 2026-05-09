@@ -149,6 +149,92 @@ function parsePublicKeyArray(raw: string | undefined, label: string): PublicKey[
 // ────────────────────────────────────────────────────────────
 const cli = cac('fortisx');
 
+// ────────────────────────────────────────────────────────────
+// Command: create_multisig
+// ────────────────────────────────────────────────────────────
+cli
+    .command('create_multisig', 'Create a new multisig')
+    .option('--members <members>', 'Space-separated list of public keys', { required: true })
+    .option('--threshold <threshold>', 'Number of required signatures', { type: Number, required: true })
+    .action(async (options, cmd) => {
+        try {
+            const creator = loadKeypair(options.keypair);
+            const connection = getConnection(options.rpc, options.commitment);
+
+            const rawAddresses = options.members.split(' ').filter(Boolean);
+            const members = rawAddresses.map(a => {
+                try { return new PublicKey(a.trim()); }
+                catch (e: any) { throw new Error(`Invalid public key: "${a}". ${e.message}`); }
+            });
+
+            const threshold = options.threshold;
+            if (threshold < 1 || threshold > members.length) {
+                throw new Error(`Threshold must be between 1 and ${members.length}`);
+            }
+
+            await createMultisig(members, threshold, creator.publicKey, creator, connection);
+            console.log(chalk.green('✅ Multisig Created!'));
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Error:'), error.message);
+            process.exit(1);
+        }
+    });
+
+
+// ────────────────────────────────────────────────────────────
+// Command: public_deposit
+// ────────────────────────────────────────────────────────────
+cli
+    .command('public_deposit', 'Deposit SOL into a public treasury')
+    .option('--amount <lamports>', 'Amount to deposit in lamports', { type: Number, required: true })
+    .option('--multisig <address>', 'Multisig account address', { required: true })
+    .action(async (options, cmd) => {
+        try {
+            const amount = options.amount;
+            if (!amount || amount <= 0) throw new Error('Valid --amount (in lamports) is required');
+
+            const depositor = loadKeypair(options.keypair);
+            const multisigPubkey = new PublicKey(options.multisig);
+
+            console.log(chalk.blue('Depositor:'), depositor.publicKey.toBase58());
+            console.log(chalk.blue('Amount:'), amount, 'lamports');
+
+            await publicDeposit(depositor, BigInt(amount), multisigPubkey);
+            console.log(chalk.green('✅ Public Deposit Completed!'));
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Error:'), error.message);
+            process.exit(1);
+        }
+    });
+
+// ────────────────────────────────────────────────────────────
+// Command: create_transfer_proposal
+// ────────────────────────────────────────────────────────────
+cli
+    .command('create_transfer_proposal', 'Create a public transfer proposal for multisig')
+    .option('--multisig <address>', 'Multisig account address', { required: true })
+    .option('--target <address>', 'Transfer recipient address', { required: true })
+    .option('--amount <lamports>', 'Amount in lamports', { type: Number, required: true })
+    .action(async (options, cmd) => {
+        try {
+            const multisig = new PublicKey(options.multisig);
+            const target = new PublicKey(options.target);
+            const amount = BigInt(options.amount);
+            const creator = loadKeypair(options.keypair);
+            const connection = getConnection(options.rpc, options.commitment);
+
+            console.log(chalk.yellow('Creating transfer proposal...'));
+            await createTransferProposal(creator, multisig, target, amount, connection);
+            console.log(chalk.green('✅ Proposal Created!'));
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Error:'), error.message);
+            process.exit(1);
+        }
+    });
+
 // Global options (available to all commands)
 cli
     .option('--rpc <url>', 'Solana RPC URL (overrides SOLANA_RPC_URL)')
@@ -278,64 +364,6 @@ cli
         }
     });
 
-// ────────────────────────────────────────────────────────────
-// Command: create_multisig
-// ────────────────────────────────────────────────────────────
-cli
-    .command('create_multisig', 'Create a new multisig configuration')
-    .option('--members <members>', 'Space-separated list of public keys', { required: true })
-    .option('--threshold <threshold>', 'Number of required signatures', { type: Number, required: true })
-    .action(async (options, cmd) => {
-        try {
-            const creator = loadKeypair(options.keypair);
-            const connection = getConnection(options.rpc, options.commitment);
-
-            const rawAddresses = options.members.split(' ').filter(Boolean);
-            const members = rawAddresses.map(a => {
-                try { return new PublicKey(a.trim()); }
-                catch (e: any) { throw new Error(`Invalid public key: "${a}". ${e.message}`); }
-            });
-
-            const threshold = options.threshold;
-            if (threshold < 1 || threshold > members.length) {
-                throw new Error(`Threshold must be between 1 and ${members.length}`);
-            }
-
-            await createMultisig(members, threshold, creator.publicKey, creator, connection);
-            console.log(chalk.green('✅ Multisig Created!'));
-
-        } catch (error: any) {
-            console.error(chalk.red('❌ Error:'), error.message);
-            process.exit(1);
-        }
-    });
-
-// ────────────────────────────────────────────────────────────
-// Command: public_deposit
-// ────────────────────────────────────────────────────────────
-cli
-    .command('public_deposit', 'Deposit SOL into a public treasury')
-    .option('--amount <lamports>', 'Amount to deposit in lamports', { type: Number, required: true })
-    .option('--multisig <address>', 'Multisig account address', { required: true })
-    .action(async (options, cmd) => {
-        try {
-            const amount = options.amount;
-            if (!amount || amount <= 0) throw new Error('Valid --amount (in lamports) is required');
-
-            const depositor = loadKeypair(options.keypair);
-            const multisigPubkey = new PublicKey(options.multisig);
-
-            console.log(chalk.blue('Depositor:'), depositor.publicKey.toBase58());
-            console.log(chalk.blue('Amount:'), amount, 'lamports');
-
-            await publicDeposit(depositor, BigInt(amount), multisigPubkey);
-            console.log(chalk.green('✅ Public Deposit Completed!'));
-
-        } catch (error: any) {
-            console.error(chalk.red('❌ Error:'), error.message);
-            process.exit(1);
-        }
-    });
 
 // ────────────────────────────────────────────────────────────
 // Command: cloak_deposit
@@ -395,31 +423,7 @@ cli
         }
     });
 
-// ────────────────────────────────────────────────────────────
-// Command: create_transfer_proposal
-// ────────────────────────────────────────────────────────────
-cli
-    .command('create_transfer_proposal', 'Create a public transfer proposal for multisig')
-    .option('--multisig <address>', 'Multisig account address', { required: true })
-    .option('--target <address>', 'Transfer recipient address', { required: true })
-    .option('--amount <lamports>', 'Amount in lamports', { type: Number, required: true })
-    .action(async (options, cmd) => {
-        try {
-            const multisig = new PublicKey(options.multisig);
-            const target = new PublicKey(options.target);
-            const amount = BigInt(options.amount);
-            const creator = loadKeypair(options.keypair);
-            const connection = getConnection(options.rpc, options.commitment);
 
-            console.log(chalk.yellow('Creating transfer proposal...'));
-            await createTransferProposal(creator, multisig, target, amount, connection);
-            console.log(chalk.green('✅ Proposal Created!'));
-
-        } catch (error: any) {
-            console.error(chalk.red('❌ Error:'), error.message);
-            process.exit(1);
-        }
-    });
 
 // ────────────────────────────────────────────────────────────
 // Command: approve_proposal

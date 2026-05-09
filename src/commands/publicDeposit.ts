@@ -7,12 +7,11 @@ export async function publicDeposit(
     multisigAddress: PublicKey // The base address of the multisig config
 ) {
     const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
-    console.log("Multisig address: ", multisigAddress);
     const [vaultPda, vaultBump] = PublicKey.findProgramAddressSync(
         [SEED_PREFIX, multisigAddress.toBytes(), SEED_VAULT],
         PROGRAM_ID
     );
-    console.log(chalk.blue('Vault PDA:'), vaultPda);
+    console.log(chalk.blue('Vault PDA: '), vaultPda.toString());
     const ix = SystemProgram.transfer({
         fromPubkey: new PublicKey(depositor.publicKey),
         toPubkey: vaultPda,

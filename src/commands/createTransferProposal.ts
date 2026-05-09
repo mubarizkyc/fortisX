@@ -128,7 +128,7 @@ export async function createTransferProposal(
 
     // 7. Send with error handling & confirmation
     try {
-        console.log(chalk.yellow('Sending transaction to Devnet...'));
+        console.log(chalk.yellow('Sending transaction...'));
         const signature = await conn.sendTransaction(tx, {
             skipPreflight: false, // ✅ Set to false to catch errors early
             maxRetries: 3,

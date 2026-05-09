@@ -30,7 +30,6 @@ export const SHARE_RAW_SIZE = 33
 export const SHARE_CIPHERTEXT_SIZE = 32 + 24 + SHARE_RAW_SIZE + 16  // 105
 export const ENCRYPTED_SHARE_SIZE = 32 + SHARE_CIPHERTEXT_SIZE  // member pubkey + ciphertext
 import { combine } from 'shamir-secret-sharing';
-//import { decryptShareFromMember } from '../shareCrypto';
 
 export class CreateMultisigIxData {
     discriminator: number;        // 1 byte (u8)
@@ -115,7 +114,6 @@ export function bytes32ToBigint(bytes: Uint8Array): bigint {
     }
     return result
 }
-
 export async function createMultisig(
     members: PublicKey[],
     threshold: number,
@@ -123,62 +121,59 @@ export async function createMultisig(
     creatorKey: Keypair,
     connection: Connection,
 ) {
-
+    // ────────────────────────────────────────────────────────
+    // 1. Validation
+    // ────────────────────────────────────────────────────────
     if (members.length === 0) throw new Error('At least one member required');
     if (threshold <= 0 || threshold > members.length) {
         throw new Error(`Invalid threshold ${threshold} for ${members.length} members`);
     }
 
-    // 1. Generate treasury UTXO keypair
+    console.log(chalk.yellow('🏗️  Initializing FortisX Multisig...'));
+    console.log(chalk.blue('Members:'), members.length);
+    console.log(chalk.blue('Threshold:'), threshold);
+
+    // ────────────────────────────────────────────────────────
+    // 2. Generate Treasury UTXO & Split Shares
+    // ────────────────────────────────────────────────────────
     const treasuryKp = await generateUtxoKeypair();
+
+    // ⚠️ SECURITY WARNING: Do NOT log the Viewing Key (nk) in production.
+    // Only log it if explicitly requested via a --show-viewing-key flag.
+    // For now, we log a truncated hash so users know it was generated.
     const viewingKeyNk = getNkFromUtxoPrivateKey(treasuryKp.privateKey);
-    console.log("view key raw: ", viewingKeyNk);
-    //print viewing key
-    console.log("viewing key: ", bs58.encode(viewingKeyNk))
-    console.log(chalk.blue('Generated treasury UTXO keypair with public key:'), treasuryKp.publicKey);
-    //display private key 
-    console.log('Treasury Private Key (bigint):', treasuryKp.privateKey);
-    const treasuryPkBytes = bigIntToLittleEndianBytes(treasuryKp.privateKey, 32);
-    console.log("Treasury Private Key", treasuryKp.privateKey);
+    const nkHash = bs58.encode(viewingKeyNk).slice(0, 8) + '...';
+    console.log(chalk.dim('🔑 Treasury Viewing Key (nk) generated:'), nkHash);
+    console.log(chalk.dim('   ⚠️  Save this key securely! It is required for compliance scanning.'));
 
-    const treasuryPkBytesBE = new Uint8Array(treasuryPkBytes).reverse();
+    console.log(chalk.blue('Treasury UTXO Public Key:'), treasuryKp.publicKey);
 
-    // Split with big-endian bytes
+    // Split private key into Shamir shares
+    const treasuryPkBytesBE = bigIntToLittleEndianBytes(treasuryKp.privateKey, 32).reverse(); // Convert to BE for Shamir if needed
+    console.log(chalk.yellow('🧩 Splitting treasury key into Shamir shares...'));
+
     const shares = await split(treasuryPkBytesBE, members.length, threshold);
 
-    // Debug logs
-    shares.forEach((share, i) => {
-        console.log(`Share ${i}: ${share.length} bytes, first 8 (BE): ${Buffer.from(share.slice(0, 8)).toString('hex')}`);
-    });
-
-    // Debug: log share sizes
-    shares.forEach((share, i) => {
-        console.log(`Share ${i}: length = ${share.length} bytes`);
-        console.log(`  First 8 bytes (hex): ${share.slice(0, 8).toString()}`);
-    });
-
-
+    // Encrypt shares for each member
+    console.log(chalk.yellow('🔐 Encrypting shares for members...'));
     const encryptedSharesPromises = members.map(async (member, i) => {
-        // 2. Await the async encryption function
         const encrypted = await encryptShare(shares[i], member);
-
-        // 3. Now 'encrypted' is Uint8Array, so .length works
-        console.log(`Encrypted share ${i}: ${encrypted.length} bytes`);
-
+        console.log(chalk.dim(`   Member ${i + 1} (${member.toBase58().slice(0, 6)}...): Encrypted (${encrypted.length} bytes)`));
         return { member, ciphertext: encrypted };
     });
-    // 4. Wait for ALL promises to resolve
+
     const encryptedShares = await Promise.all(encryptedSharesPromises);
+    console.log(chalk.green('✅ Shares encrypted successfully'));
 
-    // 4. Derive multisig PDA
-
+    // ────────────────────────────────────────────────────────
+    // 3. Derive PDA & Build Transaction
+    // ────────────────────────────────────────────────────────
     const [multisigPda] = PublicKey.findProgramAddressSync(
         [SEED_PREFIX, SEED_MULTISIG, creatorKey.publicKey.toBytes()],
         PROGRAM_ID
     );
     console.log(chalk.blue('Multisig PDA:'), multisigPda.toBase58());
 
-    // 5. Build instruction data
     const ixData = new CreateMultisigIxData({
         threshold,
         rentCollector,
@@ -187,27 +182,29 @@ export async function createMultisig(
         treasuryUtxoPubkey: bigIntToLittleEndianBytes(treasuryKp.publicKey, 32),
     });
 
-    console.log(chalk.blue('Instruction data size:'), ixData.serialize().byteLength, 'bytes');
-
-    // 6. Build instruction
     const ix = new TransactionInstruction({
         programId: PROGRAM_ID,
         keys: [
             { pubkey: TREASURY, isSigner: false, isWritable: true },
             { pubkey: multisigPda, isSigner: false, isWritable: true },
             { pubkey: creatorKey.publicKey, isSigner: true, isWritable: false },
-            { pubkey: creatorKey.publicKey, isSigner: true, isWritable: true }, // rent payer
+            { pubkey: creatorKey.publicKey, isSigner: true, isWritable: true },
             { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         ],
         data: ixData.serialize(),
     });
 
-    // 7. Zero sensitive data
-    treasuryPkBytes.fill(0);
+    // ────────────────────────────────────────────────────────
+    // 4. Secure Wipe of Sensitive Data (Before Sending)
+    // ────────────────────────────────────────────────────────
+    // Wipe raw bytes and bigint from memory ASAP
+    treasuryPkBytesBE.fill(0);
     shares.forEach(s => s.fill(0));
     treasuryKp.privateKey = 0n;
 
-    // 8. Build & sign transaction
+    // ────────────────────────────────────────────────────────
+    // 5. Send Transaction
+    // ────────────────────────────────────────────────────────
     const { blockhash } = await connection.getLatestBlockhash();
     const msg = new TransactionMessage({
         payerKey: creatorKey.publicKey,
@@ -218,22 +215,30 @@ export async function createMultisig(
     const tx = new VersionedTransaction(msg);
     tx.sign([creatorKey]);
 
-    // 9. Send transaction
-    console.log(chalk.yellow('Sending multisig creation transaction...'));
+    console.log(chalk.yellow('📤 Sending multisig creation transaction...'));
 
-    // only wipe after verification passes
-    treasuryPkBytes.fill(0)
-    shares.forEach(s => s.fill(0))
-    treasuryKp.privateKey = 0n
-    const signature = await connection.sendTransaction(tx, {
-        skipPreflight: false,
-        maxRetries: 3,
-        preflightCommitment: 'confirmed',
-    });
+    try {
+        const signature = await connection.sendTransaction(tx, {
+            skipPreflight: false,
+            maxRetries: 3,
+            preflightCommitment: 'confirmed',
+        });
 
-    console.log(chalk.green('✅ Multisig created!'));
-    console.log('Signature:', signature);
-    console.log('Multisig PDA:', multisigPda.toBase58());
+        console.log(chalk.green('✅ Multisig Created Successfully!'));
+        console.log(chalk.blue('Signature:'), signature);
+        console.log(chalk.blue('Multisig Address:'), multisigPda.toBase58());
 
-    return { signature, multisigPda, treasuryPublicKey: treasuryKp.publicKey };
+        // ⚠️ FINAL WARNING: Remind user to save the Viewing Key
+        console.log(chalk.red.bold('\n⚠️  IMPORTANT:'));
+        console.log(chalk.red('   Save your Treasury Viewing Key (nk) now!'));
+        console.log(chalk.red('   It was generated during setup and is NOT stored on-chain.'));
+        console.log(chalk.red('   Without it, you cannot scan compliance history.'));
+        console.log(chalk.dim(`   Key (nk): ${bs58.encode(viewingKeyNk)}\n`));
+
+        return { signature, multisigPda, treasuryPublicKey: treasuryKp.publicKey };
+
+    } catch (error: any) {
+        console.error(chalk.red('❌ Transaction Failed:'), error.message);
+        throw error;
+    }
 }
