@@ -6,11 +6,28 @@ Private asset swaps: Rebalance portfolios or execute trades without revealing in
 Compliance & scoped auditing: Generate full or time-bound, role-specific audit trails via viewing keys
 FortisX isn't just a multisig — it's a privacy-first treasury operating system for organizations that need confidentiality without sacrificing accountability
 
+## Usage
+FortisX application is meant to be used ,theough cli ,currenlty the source code for judging is open source ,while the in production a binary is only distibuted.
+All members the are part of multisig ,can use it ,any member can be proposer /executor ,and all members can approve the proposal,the one's not approving the proposal within the dealdine ,will simply be meant as rejection
 ## Prerequisites
 
 - Node.js ≥ 18
 - Yarn or npm
-- A Solana keypair at `~/.config/solana/id.json` (default) or specify `--keypair`
+## Setup
+set the rpc,and your keypair path
+```bash
+export SOLANA_RPC_URL=https://api.devnet.solana.com 
+export KEYPAIR_PATH  ="PATH_TO_KEYPAIR.json"
+```
+## Clone
+
+```bash
+https://github.com/mubarizkyc/fortisX.git
+cd FortisX && alias fortisX='npx tsx src/index.ts'
+source ~/.zshrc
+# view Options
+fortisX --help 
+```
 
 ## Installation
 
@@ -21,7 +38,7 @@ yarn install
 ## Running Commands
 
 ```
-npx tsx src/index.ts <command> [options]
+fortisX <command> [options]
 ```
 
 ---
@@ -35,7 +52,7 @@ Create a new on-chain multisig configuration.
 
 **Usage**
 ```
-npx tsx src/index.ts create_multisig --members "<pubkey1> <pubkey2> ..." --threshold <number>
+fortisX create_multisig --members "<pubkey1> <pubkey2> ..." --threshold <number>
 ```
 
 **Example**
