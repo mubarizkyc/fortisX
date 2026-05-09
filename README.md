@@ -1,11 +1,10 @@
-# FortisX
-```
+# FortisX 
+
 In the landscape of Solana multisig wallets, the standard flow has long been: upload proposal data on-chain, vote on it, then execute the stored transaction by invoking the target program. This is the model Fortis originally followed. Then came the Drift Protocol hack ,a wake-up call that major financial decisions shouldn't always be public. Should competitors really see whom a firm is paying, who it's receiving funds from, its asset valuations, token minting activities, or swap strategies? What about decisions to create new liquidity pools on decentralized exchanges? That's when Fortis began exploring privacy-preserving solutions and discovered Cloak. From that insight, we built FortisX: a multisig that extends Fortis with support for Shielded treasury management: Hide asset balances and transaction histories on-chain
 Private multi-type, multi-recipient transfers: Send SOL, USDC, or USDT to multiple parties without exposing amounts or addresses
 Private asset swaps: Rebalance portfolios or execute trades without revealing intent
 Compliance & scoped auditing: Generate full or time-bound, role-specific audit trails via viewing keys
 FortisX isn't just a multisig — it's a privacy-first treasury operating system for organizations that need confidentiality without sacrificing accountability
-```
 
 ## Prerequisites
 
