@@ -34,9 +34,9 @@ export async function PrivateDeposit(
     depositAmount: bigint,
     signer: Keypair,
     treasuryId: bigint,
-    depositorUtxo: string // Base58 string of input UTXO
+    depositorUtxo: string, // Base58 string of input UTXO
+    connection: Connection,
 ) {
-    const connection = new Connection("https://api.devnet.solana.com", "confirmed");
 
     console.log(chalk.yellow('⏳ Processing private transfer to Treasury...'));
 

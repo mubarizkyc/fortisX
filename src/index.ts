@@ -235,6 +235,122 @@ cli
         }
     });
 
+// ────────────────────────────────────────────────────────────
+// Command: approve_proposal
+// ────────────────────────────────────────────────────────────
+cli
+    .command('approve_proposal', 'Approve a multisig proposal as a member')
+    .option('--multisig <address>', 'Multisig account address', { required: true })
+    .option('--proposal <number>', 'Proposal number to approve', { required: true })
+    .action(async (options, cmd) => {
+        try {
+            const multisigPubkey = new PublicKey(options.multisig);
+            const proposalNumber = BigInt(options.proposal);
+            const member = loadKeypair(options.keypair);
+            const connection = getConnection(options.rpc, options.commitment);
+
+            console.log(chalk.blue('Member:'), member.publicKey.toBase58());
+            console.log(chalk.blue('Multisig:'), multisigPubkey.toBase58());
+            console.log(chalk.yellow('⏳ Processing approval...'));
+
+            await approveProposal(member, multisigPubkey, proposalNumber, connection);
+            console.log(chalk.green('✅ Approval Completed!'));
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Error:'), error.message);
+            process.exit(1);
+        }
+    });
+
+// ────────────────────────────────────────────────────────────
+// Command: execute_proposal
+// ────────────────────────────────────────────────────────────
+cli
+    .command('execute_proposal', 'Execute an approved multisig proposal')
+    .option('--multisig <address>', 'Multisig account address', { required: true })
+    .option('--proposal <number>', 'Proposal number (transaction index) to execute', { type: Number, required: true })
+    .action(async (options, cmd) => {
+        try {
+            const multisigPubkey = new PublicKey(options.multisig);
+            const proposalNumber = BigInt(options.proposal);
+            const member = loadKeypair(options.keypair);
+            const connection = getConnection(options.rpc, options.commitment);
+
+            console.log(chalk.blue('Member:'), member.publicKey.toBase58());
+            console.log(chalk.blue('Multisig:'), multisigPubkey.toBase58());
+            console.log(chalk.blue('Proposal Number:'), proposalNumber.toString());
+            console.log(chalk.yellow('⏳ Executing proposal...'));
+
+            await executeProposal(member, multisigPubkey, proposalNumber, connection);
+            console.log(chalk.green('✅ Proposal Executed!'));
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Error:'), error.message);
+            if (error.logs && Array.isArray(error.logs)) {
+                console.error('📜 Program Logs:');
+                error.logs.forEach((log: string) => console.error('  ', log));
+            }
+            process.exit(1);
+        }
+    });
+
+// ────────────────────────────────────────────────────────────
+// Command: cloak_deposit
+// ────────────────────────────────────────────────────────────
+cli
+    .command('cloak_deposit', 'Deposit SOL into Cloak Protocol (Private)')
+    .option('--mint <mint>', 'Asset Address (base58)', { required: true })
+    .option('--amount <lamports>', 'Amount to deposit in lamports', { type: Number, required: true })
+    .action(async (options, cmd) => {
+        try {
+            const amount = options.amount;
+            if (!amount || amount <= 0) throw new Error('Valid --amount is required');
+
+            const signer = loadKeypair(options.keypair);
+            const connection = getConnection(options.rpc, options.commitment);
+
+            console.log(chalk.blue('Signer:'), signer.publicKey.toBase58());
+            console.log(chalk.blue('Amount:'), amount, 'lamports');
+            console.log(chalk.yellow('⏳ Processing private deposit...'));
+
+            await CloakDeposit(BigInt(amount), signer, options.mint, connection);
+            console.log(chalk.green('✅ Cloak Deposit Completed!'));
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Error:'), error.message);
+            process.exit(1);
+        }
+    });
+
+// ────────────────────────────────────────────────────────────
+// Command: private_deposit
+// ────────────────────────────────────────────────────────────
+cli
+    .command('private_deposit', 'Transfer from Private UTXO to Multisig Treasury')
+    .option('--amount <lamports>', 'Amount to transfer in lamports', { type: Number, required: true })
+    .option('--treasury-id <id>', 'Treasury ID (BigInt) to deposit into', { required: true })
+    .option('--utxo <base58>', 'Your existing Private UTXO (Base58) to spend', { required: true })
+    .action(async (options, cmd) => {
+        try {
+            const treasuryid = parseBigInt(rawArg('--treasury-id'));
+            const amount = options.amount;
+            if (!amount || amount <= 0) throw new Error('Valid --amount is required');
+
+            const signer = loadKeypair(options.keypair);
+            const connection = getConnection(options.rpc, options.commitment);
+            console.log(chalk.blue('Signer:'), signer.publicKey.toBase58());
+            console.log(chalk.blue('Treasury ID:'), treasuryid.toString());
+            console.log(chalk.blue('Amount:'), amount, 'lamports');
+            console.log(chalk.yellow('⏳ Processing private transfer...'));
+
+            await PrivateDeposit(BigInt(amount), signer, treasuryid, options.utxo, connection);
+            console.log(chalk.green('✅ Private Transfer Completed!'));
+
+        } catch (error: any) {
+            console.error(chalk.red('❌ Error:'), error.message);
+            process.exit(1);
+        }
+    });
 // Global options (available to all commands)
 cli
     .option('--rpc <url>', 'Solana RPC URL (overrides SOLANA_RPC_URL)')
@@ -330,7 +446,7 @@ cli
     .command('execute_private_proposal', 'Execute an approved private Cloak proposal')
     .option('--multisig <address>', 'Multisig account address (base58)', { required: true })
     .option('--proposal-number <value>', 'Proposal number to execute (decimal or 0x hex)', { type: String, required: true })
-    .option('--utxo-file <path>', 'Path to file with Base58 UTXOs', { default: './multisig_utxo_logs.txt' })
+    .option('--utxo-file <path>', 'Path to file with Base58 UTXOs', { default: './treasury_utxos.json' })
     .option('--collector-port <port>', 'Port for share collector server', { type: Number, default: 3456 })
     .option('--share-timeout-ms <ms>', 'Timeout for share collection', { type: Number, default: 300000 })
     .action(async (options, cmd) => {
@@ -356,125 +472,6 @@ cli
 
         } catch (error: any) {
             console.error(chalk.red('❌ Execution Failed:'), error.message);
-            if (error.logs && Array.isArray(error.logs)) {
-                console.error('📜 Program Logs:');
-                error.logs.forEach((log: string) => console.error('  ', log));
-            }
-            process.exit(1);
-        }
-    });
-
-
-// ────────────────────────────────────────────────────────────
-// Command: cloak_deposit
-// ────────────────────────────────────────────────────────────
-cli
-    .command('cloak_deposit', 'Deposit SOL into Cloak Protocol (Private)')
-    .option('--mint <mint>', 'Asset Address (base58)', { required: true })
-    .option('--amount <lamports>', 'Amount to deposit in lamports', { type: Number, required: true })
-    .action(async (options, cmd) => {
-        try {
-            const amount = options.amount;
-            if (!amount || amount <= 0) throw new Error('Valid --amount is required');
-
-            const signer = loadKeypair(options.keypair);
-            const connection = getConnection(options.rpc, options.commitment);
-
-            console.log(chalk.blue('Signer:'), signer.publicKey.toBase58());
-            console.log(chalk.blue('Amount:'), amount, 'lamports');
-            console.log(chalk.yellow('⏳ Processing private deposit...'));
-
-            await CloakDeposit(BigInt(amount), signer, options.mint, connection);
-            console.log(chalk.green('✅ Cloak Deposit Completed!'));
-
-        } catch (error: any) {
-            console.error(chalk.red('❌ Error:'), error.message);
-            process.exit(1);
-        }
-    });
-
-// ────────────────────────────────────────────────────────────
-// Command: private_deposit
-// ────────────────────────────────────────────────────────────
-cli
-    .command('private_deposit', 'Transfer from Private UTXO to Multisig Treasury')
-    .option('--amount <lamports>', 'Amount to transfer in lamports', { type: Number, required: true })
-    .option('--treasury-id <id>', 'Treasury ID (BigInt) to deposit into', { required: true })
-    .option('--utxo <base58>', 'Your existing Private UTXO (Base58) to spend', { required: true })
-    .action(async (options, cmd) => {
-        try {
-            const treasuryid = parseBigInt(rawArg('--treasury-id'));
-            const amount = options.amount;
-            if (!amount || amount <= 0) throw new Error('Valid --amount is required');
-
-            const signer = loadKeypair(options.keypair);
-
-            console.log(chalk.blue('Signer:'), signer.publicKey.toBase58());
-            console.log(chalk.blue('Treasury ID:'), treasuryid.toString());
-            console.log(chalk.blue('Amount:'), amount, 'lamports');
-            console.log(chalk.yellow('⏳ Processing private transfer...'));
-
-            await PrivateDeposit(BigInt(amount), signer, treasuryid, options.utxo);
-            console.log(chalk.green('✅ Private Transfer Completed!'));
-
-        } catch (error: any) {
-            console.error(chalk.red('❌ Error:'), error.message);
-            process.exit(1);
-        }
-    });
-
-
-
-// ────────────────────────────────────────────────────────────
-// Command: approve_proposal
-// ────────────────────────────────────────────────────────────
-cli
-    .command('approve_proposal', 'Approve a multisig proposal as a member')
-    .option('--multisig <address>', 'Multisig account address', { required: true })
-    .option('--proposal <number>', 'Proposal number to approve', { required: true })
-    .action(async (options, cmd) => {
-        try {
-            const multisigPubkey = new PublicKey(options.multisig);
-            const proposalNumber = BigInt(options.proposal);
-            const member = loadKeypair(options.keypair);
-            const connection = getConnection(options.rpc, options.commitment);
-
-            console.log(chalk.blue('Member:'), member.publicKey.toBase58());
-            console.log(chalk.blue('Multisig:'), multisigPubkey.toBase58());
-            console.log(chalk.yellow('⏳ Processing approval...'));
-
-            await approveProposal(member, multisigPubkey, proposalNumber, connection);
-            console.log(chalk.green('✅ Approval Completed!'));
-
-        } catch (error: any) {
-            console.error(chalk.red('❌ Error:'), error.message);
-            process.exit(1);
-        }
-    });
-
-// ────────────────────────────────────────────────────────────
-// Command: execute_proposal
-// ────────────────────────────────────────────────────────────
-cli
-    .command('execute_proposal', 'Execute an approved multisig proposal')
-    .option('--multisig <address>', 'Multisig account address', { required: true })
-    .option('--proposal <number>', 'Proposal number (transaction index) to execute', { type: Number, required: true })
-    .action(async (options, cmd) => {
-        try {
-            const multisigPubkey = new PublicKey(options.multisig);
-            const proposalNumber = BigInt(options.proposal);
-            const member = loadKeypair(options.keypair);
-
-            console.log(chalk.blue('Member:'), member.publicKey.toBase58());
-            console.log(chalk.blue('Multisig:'), multisigPubkey.toBase58());
-            console.log(chalk.blue('Proposal Number:'), proposalNumber.toString());
-            console.log(chalk.yellow('⏳ Executing proposal...'));
-
-            await executeProposal(member, multisigPubkey, proposalNumber);
-            console.log(chalk.green('✅ Proposal Executed!'));
-
-        } catch (error: any) {
-            console.error(chalk.red('❌ Error:'), error.message);
             if (error.logs && Array.isArray(error.logs)) {
                 console.error('📜 Program Logs:');
                 error.logs.forEach((log: string) => console.error('  ', log));

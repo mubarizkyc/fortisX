@@ -89,6 +89,10 @@ export function buildPayloadHash(
     salt: bigint,
     entries: MultiPayoutEntry[],
 ): Buffer {
+    console.log("mint: ", mint);
+    console.log("salt: ", salt);
+    console.log("entries: ", entries);
+
     // 1. Build deterministic JSON payload (same structure as Rust)
     const payload = {
         mint: mint.toBase58(),

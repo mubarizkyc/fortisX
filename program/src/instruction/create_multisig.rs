@@ -147,9 +147,7 @@ pub fn process_create_multisig(accounts: &[AccountInfo], data: &[u8]) -> Program
         + 4                                             // members_len (u32)
         + 32 * members_len              // members array
         + 4                                             // shares_len (u32)
-        + ENCRYPTED_SHARE_SIZE * shares_len             // encrypted shares array (137 bytes each)
-        + 32                                            // treasury_utxo_pubkey (already in header, but counted for clarity)
-        + 32; // latest_utxo_commitment (in header)
+        + ENCRYPTED_SHARE_SIZE * shares_len; // encrypted shares array (137 bytes each)
 
     // ────────────────────────────────────────────────────────
     // Create Multisig Account via CPI

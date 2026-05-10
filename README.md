@@ -121,31 +121,82 @@ fortisX create_transfer_proposal \
 | `--amount <lamports>` | Amount in lamports |
 
 **Descreption**
+
 This command creates a proposal for a native transfer. FortisX supports all tx types (token transfers, loans, swaps, upgrades, etc.). You just pass the transaction message as a Base58 string; FortisX stores it on-chain and executes it by invoking the target program.
+
 ---
 
-
-### `cloak_deposit`
-Deposit SOL into the **Cloak Protocol** to mint a private UTXO.
+### `approve_proposal`
+Approve a pending multisig proposal as a member.
 
 **Usage**
 ```
-npx tsx src/index.ts cloak_deposit --mint <address> --amount <lamports> [--keypair <path>]
+fortisX approve_proposal --multisig <address> --proposal <number>
 ```
 
 **Example**
 ```bash
-npx tsx src/index.ts cloak_deposit \
-  --mint So11111111111111111111111111111111111111112 \
-  --amount 1000000000
+foritsX approve_proposal \
+  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --proposal 1
 ```
 
 | Flag | Description | Default |
 |---|---|---|
-| `--keypair <path>` | Path to signer keypair JSON | `~/.config/solana/id.json` |
-| `--mint <address>` | Asset (mint) address (base58) | ✅ Required |
-| `--amount <lamports>` | Amount to deposit in lamports | ✅ Required |
+| `--keypair <path>` | Path to member keypair JSON | `~/.config/solana/id.json` |
+| `--multisig <address>` | Multisig account address (base58) | ✅ Required |
+| `--proposal <number>` | Proposal number (transaction index) to approve | ✅ Required |
 
+---
+
+---
+
+### `execute_proposal`
+Execute an approved **public** multisig proposal.
+
+**Usage**
+```
+fortisX execute_proposal --multisig <address> --proposal <number>
+```
+
+**Example**
+```bash
+fortisX execute_proposal \
+  --multisig  BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --proposal 1
+```
+
+| Flag | Description |
+|---|---|
+| `--multisig <address>` | Multisig account address (base58) |
+| `--proposal <number>` | Proposal number (transaction index) to execute |
+
+---
+
+### `cloak_deposit`
+Deposit into the **Cloak Protocol** to mint a private UTXO.
+
+**Usage**
+```
+fortisX cloak_deposit --mint <address> --amount <lamports>
+```
+
+**Example**
+```bash
+fortisX cloak_deposit \
+  --mint So11111111111111111111111111111111111111112 \
+  --amount 10000000
+```
+
+| Flag | Description |
+|---|---|
+| `--mint <address>` | Asset (mint) address (base58) |
+| `--amount <lamports>` | Amount to deposit in lamports |
+
+
+**Descreption**
+
+When depositing any asset into the Cloak pool, you must save your UTXO keypair. The UTXO details will be saved to cloak_deposits.txt. Use the UTXO commitment from this file to access your assets in future transactions.
 ---
 
 ### `private_deposit`
@@ -153,24 +204,24 @@ Transfer from a private Cloak UTXO into the multisig treasury.
 
 **Usage**
 ```
-npx tsx src/index.ts private_deposit --treasury-id <bigint> --utxo <base58> --amount <lamports> [--keypair <path>]
+fortisX private_deposit --treasury-id <bigint> --utxo <base58> --amount <lamports>
 ```
 
 **Example**
 ```bash
-npx tsx src/index.ts private_deposit \
-  --treasury-id 42 \
-  --utxo 3Fyd4a7cApAf6TcGiDPPTGjGFrNNBHDuLpTG9iQA2cD5 \
-  --amount 500000000
+fortisX private_deposit --treasury-id 1273225015818612797192906101562736704378543174907210035582014424758348943475 --amount 10000000 --utxo "EACA7nSL1Dmd8HxG3s6tCPHeFEnoThy61Lv2xTDH28C831Aywzh5NAVjUT7dBtDNuKcvsuStYhwhnCWfFwtDMxnfgzT9HdX2BnHR7YHHXPL8qBBXw5xQisfKtxNScgMdZiaDmmmANHhhCnE9tvPQD3vpus6CBxZrUFc4WS1hccH5K1y"
+
 ```
 
-| Flag | Description | Default |
-|---|---|---|
-| `--keypair <path>` | Path to signer keypair JSON | `~/.config/solana/id.json` |
-| `--treasury-id <id>` | Treasury ID (BigInt) to deposit into | ✅ Required |
-| `--utxo <base58>` | Your existing private UTXO (Base58) to spend | ✅ Required |
-| `--amount <lamports>` | Amount to transfer in lamports | ✅ Required |
+| Flag | Description |
+|---|---|
+| `--treasury-id <id>` | Treasury ID (BigInt) to deposit into |
+| `--utxo <base58>` | Your existing private UTXO (Base58) to spend |
+| `--amount <lamports>` | Amount to transfer in lamports |
 
+**Descreption**
+
+private deposit movees ur funds from cloak to a new utxo owned by mutlsig
 ---
 
 ### `create_private_transfer_proposal`
@@ -180,27 +231,27 @@ Create a **private** Cloak transfer proposal. Supports single and batch payouts.
 
 **Usage**
 ```
-npx tsx src/index.ts create_private_transfer_proposal \
+fortisX create_private_transfer_proposal \
   --multisig <address> --mint <address> \
-  --commitment <bigint|hex> --target <pubkey> --amount <lamports> \
-  [--deadline <seconds>] [--keypair <path>]
+  --commitment <bigint> --target <pubkey> --amount <lamports> \
+  [--deadline <seconds>]
 ```
 
 **Example**
 ```bash
-npx tsx src/index.ts create_private_transfer_proposal \
-  --multisig 9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin \
-  --mint So11111111111111111111111111111111111111112 \
-  --commitment 0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b \
-  --target 4vJ9JU1bJJE96FWSJKvHsmmFADCg4GPZQSgcvoEkmmER \
-  --amount 500000000
+fortisX create_private_transfer_proposal \
+  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --mint So11111111111111111111111111111111111111112  \
+  --commitment 20386548276263145825368662695279343337887981784214581032640798115725144677639 \
+  --target ap5oPFPVSnxtc8bbvcCeKwy9Xnu5NePhMGzX2hexDVh \
+  --amount 10000000
 ```
 
 #### Batch payouts
 
 **Usage**
 ```
-npx tsx src/index.ts create_private_transfer_proposal \
+fortisX create_private_transfer_proposal \
   --multisig <address> --mint <address> \
   --commitments "<c1>,<c2>,..." --targets "<pk1>,<pk2>,..." --amounts "<a1>,<a2>,..." \
   [--deadline <seconds>] [--keypair <path>]
@@ -208,12 +259,13 @@ npx tsx src/index.ts create_private_transfer_proposal \
 
 **Example**
 ```bash
-npx tsx src/index.ts create_private_transfer_proposal \
-  --multisig 9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin \
-  --mint So11111111111111111111111111111111111111112 \
-  --commitments "0x1a2b3c4d,0x5e6f7a8b,0x9c0d1e2f" \
-  --targets "4vJ9JU1bJJE96FWSJKvHsmmFADCg4GPZQSgcvoEkmmER,9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin,3Fyd4a7cApAf6TcGiDPPTGjGFrNNBHDuLpTG9iQA2cD5" \
-  --amounts "100000000,200000000,300000000"
+fortisX create_private_transfer_proposal \
+  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --mint 61ro7AExqfk4dZYoCyRzTahahCC2TdUUZ4M5epMPunJf \
+  --commitments "14996677493515651068783397139729104799819374275888258521843076605771731093339,15194954822714547376119163268215551182114727436326470719522714104672629813338" \
+  --targets "ap5oPFPVSnxtc8bbvcCeKwy9Xnu5NePhMGzX2hexDVh,9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin" \                                                                                                     
+  --amounts "10000000,10000000"
+
 ```
 
 | Flag | Description | Default |
@@ -231,6 +283,9 @@ npx tsx src/index.ts create_private_transfer_proposal \
 
 > **Note:** All batch arrays (`--commitments`, `--targets`, `--amounts`) must be the same length. Max 255 entries per proposal.
 
+**Descreption**
+
+this commnads ,allows creating a multi asset type ,multisi recipeitn ,payout progposal
 ---
 
 ### `create_private_swap_proposal`
@@ -238,27 +293,26 @@ Create a **private Cloak swap** proposal (token-to-token via a private UTXO).
 
 **Usage**
 ```
-npx tsx src/index.ts create_private_swap_proposal \
+fortisX create_private_swap_proposal \
   --multisig <address> --mint <source-mint> \
   --commitment <bigint|hex> --amount <input-units> \
   --recipient-ata <pubkey> --target-mint <pubkey> \
-  [--deadline <seconds>] [--keypair <path>]
+  [--deadline <seconds>]
 ```
 
 **Example**
 ```bash
-npx tsx src/index.ts create_private_swap_proposal \
-  --multisig 9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin \
-  --mint So11111111111111111111111111111111111111112 \
-  --commitment 0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b \
-  --amount 1000000000 \
-  --recipient-ata 4vJ9JU1bJJE96FWSJKvHsmmFADCg4GPZQSgcvoEkmmER \
-  --target-mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+fortisX create_private_swap_proposal \
+  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --mint So11111111111111111111111111111111111111112   \
+  --commitment 6342836635818038368715290775834697544185193584494730878152549536787210386746 \
+  --amount 10000000 \
+  --recipient-ata Bb4i1hout62G71odfmmwaBRcJCbQdn7LEpGFEX3z7vBA \
+  --target-mint 61ro7AExqfk4dZYoCyRzTahahCC2TdUUZ4M5epMPunJf   
 ```
 
-| Flag | Description | Default |
-|---|---|---|
-| `--keypair <path>` | Path to creator keypair JSON | `~/.config/solana/id.json` |
+| Flag | Description |
+|---|---|
 | `--multisig <address>` | Multisig account address (base58) | ✅ Required |
 | `--mint <pubkey>` | Source token mint (base58) | ✅ Required |
 | `--commitment <value>` | UTXO commitment to spend (decimal or 0x hex) | ✅ Required |
@@ -269,79 +323,32 @@ npx tsx src/index.ts create_private_swap_proposal \
 
 ---
 
-### `approve_proposal`
-Approve a pending multisig proposal as a member.
-
-**Usage**
-```
-npx tsx src/index.ts approve_proposal --multisig <address> --proposal <number> [--keypair <path>]
-```
-
-**Example**
-```bash
-npx tsx src/index.ts approve_proposal \
-  --multisig 9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin \
-  --proposal 0
-```
-
-| Flag | Description | Default |
-|---|---|---|
-| `--keypair <path>` | Path to member keypair JSON | `~/.config/solana/id.json` |
-| `--multisig <address>` | Multisig account address (base58) | ✅ Required |
-| `--proposal <number>` | Proposal number (transaction index) to approve | ✅ Required |
-
----
-
-### `execute_proposal`
-Execute an approved **public** multisig proposal.
-
-**Usage**
-```
-npx tsx src/index.ts execute_proposal --multisig <address> --proposal <number> [--keypair <path>]
-```
-
-**Example**
-```bash
-npx tsx src/index.ts execute_proposal \
-  --multisig 9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin \
-  --proposal 0
-```
-
-| Flag | Description | Default |
-|---|---|---|
-| `--keypair <path>` | Path to member keypair JSON | `~/.config/solana/id.json` |
-| `--multisig <address>` | Multisig account address (base58) | ✅ Required |
-| `--proposal <number>` | Proposal number (transaction index) to execute | ✅ Required |
-
----
 
 ### `execute_private_proposal`
 Execute an approved **private** Cloak proposal. Starts a local share-collector server and waits for members to call `submit_share`.
 
 **Usage**
 ```
-npx tsx src/index.ts execute_private_proposal \
+fortisX execute_private_proposal \
   --multisig <address> --proposal-number <number> \
-  [--utxo-file <path>] [--dao-db <path>] [--cloak-program <address>] [--keypair <path>]
+  [--utxo-file <path>] [--dao-db <path>] [--cloak-program <address>]
 ```
 
 **Example**
 ```bash
-npx tsx src/index.ts execute_private_proposal \
-  --multisig 9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin \
-  --proposal-number 0 \
-  --utxo-file ./my_utxo_logs.txt
+fortisX execute_private_proposal \
+  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --proposal-number 2 \
 ```
 
-| Flag | Description | Default |
+| Flag | Description |
 |---|---|---|
-| `--keypair <path>` | Path to executing member keypair JSON | `~/.config/solana/id.json` |
-| `--multisig <address>` | Multisig account address (base58) | ✅ Required |
-| `--proposal-number <value>` | Proposal number to execute (decimal or 0x hex) | ✅ Required |
-| `--utxo-file <path>` | Path to file with Base58 UTXOs (one per line) | `./multisig_utxo_logs.txt` |
-| `--dao-db <path>` | Path to local DAO UTXO database JSON | `./dao_utxo_db.json` |
-| `--cloak-program <address>` | Cloak program ID override (base58) | — |
+| `--multisig <address>` | Multisig account address (base58) |
+| `--proposal-number <value>` | Proposal number to execute (decimal or 0x hex) |
 
+**Descreption**
+
+execute private proposal ,looks at mentiosed utxo ,in the utxos_db ,and executes the transfer or swap proposal,for this purpose we need the mutlisig onwed utxo private key ,the way we get that is ,we start an https server ,the mebers fetch theri encrytped share from chain ,decryptes t ,and send it to the server ,the server ,combines the shares ,and recosntructs the key
 ---
 
 ### `submit_share`
@@ -349,20 +356,17 @@ Fetch, decrypt, and submit your **Shamir share** to the collector server started
 
 **Usage**
 ```
-npx tsx src/index.ts submit_share --multisig <address> [--collector-url <url>] [--keypair <path>] [--insecure] [--timeout <ms>]
+fortisX submit_share --multisig <address> [--insecure] [--timeout <ms>]
 ```
 
 **Example**
 ```bash
-npx tsx src/index.ts submit_share \
-  --multisig 9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin \
-  --keypair ~/.config/solana/member2.json
+fortisX submit_share   --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho --insecure
 ```
 
-| Flag | Description | Default |
+| Flag | Description |
 |---|---|---|
-| `--keypair <path>` | Path to YOUR member keypair JSON (for decryption) | `~/.config/solana/id.json` |
-| `--multisig <address>` | Multisig account address (base58) | ✅ Required |
+| `--multisig <address>` | Multisig account address (base58) |
 | `--collector-url <url>` | Share collector endpoint URL | `http://localhost:3456/api/submit-share` |
 | `--insecure` | Allow self-signed HTTPS certs (local testing) | `false` |
 | `--timeout <ms>` | Request timeout in milliseconds | `30000` |
@@ -374,14 +378,14 @@ Scan Cloak transaction history for compliance/auditing using a viewing key.
 
 **Usage**
 ```
-npx tsx src/index.ts scan-compliance --viewing-key <base58> [--rpc <url>] [--limit <number>]
+fortisX scan-compliance --viewing-key <base58> [--limit <number>]
 ```
 
 **Example**
 ```bash
-npx tsx src/index.ts scan-compliance \
-  --viewing-key 3Fyd4a7cApAf6TcGiDPPTGjGFrNNBHDuLpTG9iQA2cD5 \
-  --limit 100
+fortisX scan-compliance \
+  --viewing-key 9TesvoxeQCbF5Fu4Ym5fE1YEBZZDjyAuA9ozsayqg8SC \
+  --limit 5
 ```
 
 | Flag | Description | Default |

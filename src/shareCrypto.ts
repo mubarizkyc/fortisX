@@ -18,15 +18,27 @@ export async function fetchAndDecryptShare(
     const account = await connection.getAccountInfo(multisigAddress);
     if (!account) throw new Error('Multisig account not found');
 
-    // Parse members_len at MULTISIG_HEADER_SIZE
+
+    // Add these debug lines
+    console.log('Account data length:', account.data.length);
+    console.log('MULTISIG_HEADER_SIZE:', MULTISIG_HEADER_SIZE);
+    console.log('members_len raw bytes:', account.data.slice(MULTISIG_HEADER_SIZE, MULTISIG_HEADER_SIZE + 4));
+
     const members_len = account.data.readUInt32LE(MULTISIG_HEADER_SIZE);
+    console.log('members_len parsed:', members_len);
+
     const members_end = MULTISIG_HEADER_SIZE + 4 + (members_len * MEMBER_PUBKEY_SIZE);
+    console.log('members_end:', members_end);
 
-    // shares_count immediately after members array
     const shares_count = account.data.readUInt32LE(members_end);
-    const shares_data_offset = members_end + 4;
+    console.log('shares_count:', shares_count);
 
+    const shares_data_offset = members_end + 4;
     const expected = shares_data_offset + shares_count * ONCHAIN_ENTRY_SIZE;
+    console.log('expected total:', expected, 'actual:', account.data.length);
+
+    // Parse members_len at MULTISIG_HEADER_SIZE
+
     if (account.data.length < expected) {
         throw new Error(`Account too short: ${account.data.length} < ${expected}`);
     }

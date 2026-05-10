@@ -17,6 +17,7 @@ export async function executeProposal(
     memberKeypair: Keypair,
     multisigAddress: PublicKey,
     proposalNumber: bigint,
+    connection: Connection
 ) {
 
     const [vaultPda] = PublicKey.findProgramAddressSync(
@@ -46,7 +47,6 @@ export async function executeProposal(
         ],
         PROGRAM_ID
     );
-    const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
     const txAccount = await connection.getAccountInfo(txPda);
     if (!txAccount) {
         throw new Error('Transaction account not found');
@@ -70,9 +70,9 @@ export async function executeProposal(
 
     const messageBytesStart = 78 + ephemeralSignersCount;
     const messageBytes = txAccount.data.slice(messageBytesStart);
-    console.log("vault pda", vaultPda.toBase58());
-    console.log("proposal pda", ProposalPda.toBase58());
-    console.log("transaction pda", txPda.toBase58());
+    console.log("vault pda", vaultPda.toString());
+    console.log("proposal pda", ProposalPda.toString());
+    console.log("transaction pda", txPda.toString());
     const { accountMetas } = await accountsForTransactionExecute({
         connection,
         messageBytes,
