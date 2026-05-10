@@ -1,44 +1,54 @@
-# FortisX 
+# FortisX
 
-In the landscape of Solana multisig wallets, the standard flow has long been: upload proposal data on-chain, vote on it, then execute the stored transaction by invoking the target program. This is the model Fortis originally followed. Then came the Drift Protocol hack ,a wake-up call that major financial decisions shouldn't always be public. Should competitors really see whom a firm is paying, who it's receiving funds from, its asset valuations, token minting activities, or swap strategies? What about decisions to create new liquidity pools on decentralized exchanges? That's when Fortis began exploring privacy-preserving solutions and discovered Cloak. From that insight, we built FortisX: a multisig that extends Fortis with support for Shielded treasury management: Hide asset balances and transaction histories on-chain
-Private multi-type, multi-recipient transfers: Send SOL, USDC, or USDT to multiple parties without exposing amounts or addresses
-Private asset swaps: Rebalance portfolios or execute trades without revealing intent
-Compliance & scoped auditing: Generate full or time-bound, role-specific audit trails via viewing keys
-FortisX isn't just a multisig — it's a privacy-first treasury operating system for organizations that need confidentiality without sacrificing accountability
+In the landscape of Solana multisig wallets, the standard flow has long been: upload proposal data on-chain, vote on it, then execute the stored transaction by invoking the target program. This is the model Fortis originally followed.
 
-## Usage
-FortisX application is meant to be used ,theough cli ,currenlty the source code for judging is open source ,while the in production a binary is only distibuted.
-All members the are part of multisig ,can use it ,any member can be proposer /executor ,and all members can approve the proposal,the one's not approving the proposal within the dealdine ,will simply be meant as rejection
+Then came the Drift Protocol hack — a wake-up call that major financial decisions should not always be public. Should competitors see whom a firm is paying, who it is receiving funds from, its asset valuations, token minting activities, or swap strategies? What about decisions to create new liquidity pools on decentralised exchanges?
+
+That is when we began exploring privacy-preserving solutions and discovered Cloak. From that insight, we built FortisX: a multisig that extends Fortis with a private execution layer.
+
+**What FortisX adds:**
+- Shielded treasury management — hide asset balances and transaction histories on-chain
+- Private multi-type, multi-recipient transfers — send SOL, USDC, or USDT to multiple parties without exposing amounts or addresses
+- Private asset swaps — rebalance portfolios or execute trades without revealing intent
+- Compliance and scoped auditing — generate full or time-bound, role-specific audit trails via viewing keys
+
+FortisX is not just a multisig. It is a privacy-first treasury operating system for organisations that need confidentiality without sacrificing accountability.
+
+---
+
+## How it works
+
+**Public proposals** follow the standard multisig pattern: proposal stored on-chain, members vote, executor fires the transaction.
+
+**Private proposals** work differently. When a proposer creates a private transfer or swap, only a Blake3 hash of the payload is written on-chain. The actual payload — recipients, amounts, UTXO commitments — lives in an off-chain database accessible to members. Members fetch the payload, verify it matches the on-chain hash, and vote. At execution time, the executor starts a local share-collector server. Each member fetches their encrypted Shamir share from the chain, decrypts it with their Solana keypair, and submits it to the collector. Once the threshold is reached, the treasury private key is reconstructed, a Groth16 proof is generated via the Cloak SDK, and the transfer or swap executes — with no amounts or addresses visible on-chain.
+
+**Key management** — at multisig creation, the treasury UTXO private key is split into N Shamir shares. Each share is encrypted with the corresponding member's Ed25519 public key (via X25519 ECDH + NaCl secretbox) and stored on-chain. No single member ever holds the full key. Reconstruction requires M-of-N members to cooperate at execution time, after which the key is discarded from memory.
+
+---
+
 ## Prerequisites
 
-- Node.js ≥ 18
+- Node.js >= 18
 - Yarn or npm
+
+---
+
 ## Setup
-set the rpc,and your keypair path
-```bash
-export SOLANA_RPC_URL=https://api.devnet.solana.com 
-export KEYPAIR_PATH  ="PATH_TO_KEYPAIR.json"
-```
-## Clone
 
 ```bash
-https://github.com/mubarizkyc/fortisX.git
-cd FortisX && alias fortisX='npx tsx src/index.ts'
-source ~/.zshrc
-# view Options
-fortisX --help 
+export SOLANA_RPC_URL=https://api.devnet.solana.com
+export KEYPAIR_PATH=/path/to/keypair.json
 ```
 
-## Installation
-
 ```bash
+git clone https://github.com/mubarizkyc/fortisX.git
+cd FortisX
 yarn install
+alias fortisX='npx tsx src/index.ts'
 ```
 
-## Running Commands
-
-```
-fortisX <command> [options]
+```bash
+fortisX --help
 ```
 
 ---
@@ -47,15 +57,14 @@ fortisX <command> [options]
 
 ---
 
-### `create_multisig`
-Create a new on-chain multisig configuration.
+### create_multisig
 
-**Usage**
+Create a new on-chain multisig. Generates a treasury UTXO keypair, splits the private key via Shamir Secret Sharing, encrypts each share with the corresponding member's public key, and stores everything on-chain.
+
 ```
 fortisX create_multisig --members "<pubkey1> <pubkey2> ..." --threshold <number>
 ```
 
-**Example**
 ```bash
 fortisX create_multisig \
   --members "ap5oPFPVSnxtc8bbvcCeKwy9Xnu5NePhMGzX2hexDVh 44abtGibbueKQDXaw3PG9N1TrqhaF6RMao7jsW7QRC68" \
@@ -63,106 +72,224 @@ fortisX create_multisig \
 ```
 
 | Flag | Description |
-|---|---|---|
-| `--members <members>` | Space-separated list of member public keys (base58) |
+|---|---|
+| `--members <pubkeys>` | Space-separated list of member public keys (base58) |
 | `--threshold <number>` | Number of required approvals |
-
-**Descreption**
-Creates a new multisig account and stores the member list, threshold, and UTXO public key on-chain. The UTXO private key is split via Shamir Secret Sharing; each share is encrypted with the respective member's public key and stored on-chain.
 
 ---
 
-### `public_deposit`
-Deposit asset into the multisig public treasury.
+### public_deposit
 
-**Usage**
+Deposit SOL into the multisig public treasury (the multisig PDA). SPL and Token-2022 tokens can also be deposited by creating an ATA.
+
 ```
-fortisX public_deposit --multisig <address> --amount <lamports> 
+fortisX public_deposit --multisig <address> --amount <lamports>
 ```
 
-**Example**
 ```bash
 fortisX public_deposit \
-  --multisig  BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
   --amount 10000000
 ```
 
 | Flag | Description |
-|---|---|---|
+|---|---|
 | `--multisig <address>` | Multisig account address (base58) |
 | `--amount <lamports>` | Amount to deposit in lamports |
 
-**Descreption**
-Deposits into the public treasury (multisig PDA). This commands support SOL; SPL &
-Token-2022 tokens can also be deposited by creating an ATA.
+---
+
+### cloak_deposit
+
+Deposit an asset into the Cloak Protocol to mint a private UTXO. UTXO details are saved to `cloak_deposits.txt`. Use the commitment from this file in subsequent private proposals.
+
+```
+fortisX cloak_deposit --mint <address> --amount <lamports>
+```
+
+```bash
+fortisX cloak_deposit \
+  --mint So11111111111111111111111111111111111111112 \
+  --amount 10000000
+```
+
+| Flag | Description |
+|---|---|
+| `--mint <address>` | Asset mint address (base58) |
+| `--amount <lamports>` | Amount to deposit in lamports |
 
 ---
 
-### `create_transfer_proposal`
-Create a **public** SOL transfer proposal for multisig approval.
+### private_deposit
 
-**Usage**
+Transfer from a private Cloak UTXO into the multisig treasury. Creates a new UTXO owned by the multisig treasury keypair.
+
+```
+fortisX private_deposit --treasury-id <bigint> --utxo <base58> --amount <lamports>
+```
+
+```bash
+fortisX private_deposit \
+  --treasury-id 1273225015818612797192906101562736704378543174907210035582014424758348943475 \
+  --amount 10000000 \
+  --utxo "EACA7nSL1Dmd8HxG3s6tCPHeFEnoThy61Lv2xTDH28C831Aywzh5NAVjUT7dBtDNuKcvsuStYhwhnCWfFwtDMxnfgzT9HdX2BnHR7YHHXPL8qBBXw5xQisfKtxNScgMdZiaDmmmANHhhCnE9tvPQD3vpus6CBxZrUFc4WS1hccH5K1y"
+```
+
+| Flag | Description |
+|---|---|
+| `--treasury-id <id>` | Treasury UTXO public key as BigInt |
+| `--utxo <base58>` | Existing private UTXO (base58) to spend |
+| `--amount <lamports>` | Amount to transfer in lamports |
+
+---
+
+### create_transfer_proposal
+
+Create a public SOL transfer proposal for multisig approval. FortisX supports all transaction types — token transfers, swaps, program upgrades, and so on. Pass the transaction message as a base58 string; FortisX stores it on-chain and executes it by invoking the target program.
+
 ```
 fortisX create_transfer_proposal --multisig <address> --target <address> --amount <lamports>
 ```
 
-**Example**
 ```bash
 fortisX create_transfer_proposal \
-  --multisig  BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
   --target ap5oPFPVSnxtc8bbvcCeKwy9Xnu5NePhMGzX2hexDVh \
   --amount 10000000
 ```
 
-| Flag | Description 
+| Flag | Description |
 |---|---|
 | `--multisig <address>` | Multisig account address (base58) |
 | `--target <address>` | Transfer recipient address (base58) |
 | `--amount <lamports>` | Amount in lamports |
 
-**Descreption**
-
-This command creates a proposal for a native transfer. FortisX supports all tx types (token transfers, loans, swaps, upgrades, etc.). You just pass the transaction message as a Base58 string; FortisX stores it on-chain and executes it by invoking the target program.
-
 ---
 
-### `approve_proposal`
-Approve a pending multisig proposal as a member.
+### create_private_transfer_proposal
 
-**Usage**
+Create a private Cloak transfer proposal. Supports single and batch payouts. Only a Blake3 hash of the payload is written on-chain; recipient addresses and amounts remain off-chain.
+
+**Single payout**
+
 ```
-fortisX approve_proposal --multisig <address> --proposal <number>
+fortisX create_private_transfer_proposal \
+  --multisig <address> --mint <address> \
+  --commitment <bigint> --target <pubkey> --amount <lamports> \
+  [--deadline <seconds>]
 ```
 
-**Example**
 ```bash
-foritsX approve_proposal \
+fortisX create_private_transfer_proposal \
   --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
-  --proposal 1
+  --mint So11111111111111111111111111111111111111112 \
+  --commitment 20386548276263145825368662695279343337887981784214581032640798115725144677639 \
+  --target ap5oPFPVSnxtc8bbvcCeKwy9Xnu5NePhMGzX2hexDVh \
+  --amount 10000000
+```
+
+**Batch payouts**
+
+```
+fortisX create_private_transfer_proposal \
+  --multisig <address> --mint <address> \
+  --commitments "<c1>,<c2>,..." --targets "<pk1>,<pk2>,..." --amounts "<a1>,<a2>,..." \
+  [--deadline <seconds>]
+```
+
+```bash
+fortisX create_private_transfer_proposal \
+  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --mint 61ro7AExqfk4dZYoCyRzTahahCC2TdUUZ4M5epMPunJf \
+  --commitments "14996677493515651068783397139729104799819374275888258521843076605771731093339,15194954822714547376119163268215551182114727436326470719522714104672629813338" \
+  --targets "ap5oPFPVSnxtc8bbvcCeKwy9Xnu5NePhMGzX2hexDVh,9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin" \
+  --amounts "10000000,10000000"
 ```
 
 | Flag | Description | Default |
 |---|---|---|
-| `--keypair <path>` | Path to member keypair JSON | `~/.config/solana/id.json` |
-| `--multisig <address>` | Multisig account address (base58) | ✅ Required |
-| `--proposal <number>` | Proposal number (transaction index) to approve | ✅ Required |
+| `--multisig <address>` | Multisig account address (base58) | required |
+| `--mint <address>` | Asset mint address (base58) | required |
+| `--commitments <values>` | UTXO commitments, comma-separated (decimal or 0x hex) | batch mode |
+| `--targets <pubkeys>` | Recipient public keys, comma-separated (base58) | batch mode |
+| `--amounts <values>` | Amounts in lamports, comma-separated | batch mode |
+| `--commitment <value>` | Single UTXO commitment | single mode |
+| `--target <pubkey>` | Single recipient pubkey | single mode |
+| `--amount <value>` | Single amount in lamports | single mode |
+| `--deadline <seconds>` | Voting deadline in seconds | `86400` |
+
+All batch arrays must be the same length. Maximum 255 entries per proposal.
 
 ---
 
+### create_private_swap_proposal
+
+Create a private Cloak swap proposal. The swap is executed via the Cloak relay using Jupiter routing. Only the payload hash is written on-chain.
+
+```
+fortisX create_private_swap_proposal \
+  --multisig <address> --mint <source-mint> \
+  --commitment <bigint> --amount <input-units> \
+  --recipient-ata <pubkey> --target-mint <pubkey> \
+  [--deadline <seconds>]
+```
+
+```bash
+fortisX create_private_swap_proposal \
+  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --mint So11111111111111111111111111111111111111112 \
+  --commitment 6342836635818038368715290775834697544185193584494730878152549536787210386746 \
+  --amount 10000000 \
+  --recipient-ata Bb4i1hout62G71odfmmwaBRcJCbQdn7LEpGFEX3z7vBA \
+  --target-mint 61ro7AExqfk4dZYoCyRzTahahCC2TdUUZ4M5epMPunJf
+```
+
+| Flag | Description |
+|---|---|
+| `--multisig <address>` | Multisig account address (base58) |
+| `--mint <pubkey>` | Source token mint (base58) |
+| `--commitment <value>` | UTXO commitment to spend (decimal or 0x hex) |
+| `--amount <value>` | Amount to swap in input token units |
+| `--recipient-ata <pubkey>` | Recipient ATA for the output token (base58) |
+| `--target-mint <pubkey>` | Mint of the token being swapped to (base58) |
+| `--deadline <seconds>` | Voting deadline in seconds (default: `86400`) |
+
 ---
 
-### `execute_proposal`
-Execute an approved **public** multisig proposal.
+### approve_proposal
 
-**Usage**
+Approve a pending multisig proposal as a member. Works for both public and private proposals.
+
+```
+fortisX approve_proposal --multisig <address> --proposal <number>
+```
+
+```bash
+fortisX approve_proposal \
+  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --proposal 1
+```
+
+| Flag | Description |
+|---|---|
+| `--multisig <address>` | Multisig account address (base58) |
+| `--proposal <number>` | Proposal number (transaction index) to approve |
+
+Members who do not approve within the voting deadline are treated as rejections.
+
+---
+
+### execute_proposal
+
+Execute an approved public multisig proposal.
+
 ```
 fortisX execute_proposal --multisig <address> --proposal <number>
 ```
 
-**Example**
 ```bash
 fortisX execute_proposal \
-  --multisig  BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
+  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
   --proposal 1
 ```
 
@@ -173,215 +300,63 @@ fortisX execute_proposal \
 
 ---
 
-### `cloak_deposit`
-Deposit into the **Cloak Protocol** to mint a private UTXO.
+### execute_private_proposal
 
-**Usage**
+Execute an approved private Cloak proposal. Starts a local share-collector server on port 3456 and waits for members to submit their Shamir shares via `submit_share`. Once the threshold is reached, the treasury key is reconstructed and the Cloak transaction is submitted.
+
 ```
-fortisX cloak_deposit --mint <address> --amount <lamports>
+fortisX execute_private_proposal \
+  --multisig <address> --proposal-number <number> \
+  [--utxo-file <path>] [--collector-port <port>] [--share-timeout-ms <ms>]
 ```
 
-**Example**
 ```bash
-fortisX cloak_deposit \
-  --mint So11111111111111111111111111111111111111112 \
-  --amount 10000000
-```
-
-| Flag | Description |
-|---|---|
-| `--mint <address>` | Asset (mint) address (base58) |
-| `--amount <lamports>` | Amount to deposit in lamports |
-
-
-**Descreption**
-
-When depositing any asset into the Cloak pool, you must save your UTXO keypair. The UTXO details will be saved to cloak_deposits.txt. Use the UTXO commitment from this file to access your assets in future transactions.
----
-
-### `private_deposit`
-Transfer from a private Cloak UTXO into the multisig treasury.
-
-**Usage**
-```
-fortisX private_deposit --treasury-id <bigint> --utxo <base58> --amount <lamports>
-```
-
-**Example**
-```bash
-fortisX private_deposit --treasury-id 1273225015818612797192906101562736704378543174907210035582014424758348943475 --amount 10000000 --utxo "EACA7nSL1Dmd8HxG3s6tCPHeFEnoThy61Lv2xTDH28C831Aywzh5NAVjUT7dBtDNuKcvsuStYhwhnCWfFwtDMxnfgzT9HdX2BnHR7YHHXPL8qBBXw5xQisfKtxNScgMdZiaDmmmANHhhCnE9tvPQD3vpus6CBxZrUFc4WS1hccH5K1y"
-
-```
-
-| Flag | Description |
-|---|---|
-| `--treasury-id <id>` | Treasury ID (BigInt) to deposit into |
-| `--utxo <base58>` | Your existing private UTXO (Base58) to spend |
-| `--amount <lamports>` | Amount to transfer in lamports |
-
-**Descreption**
-
-private deposit movees ur funds from cloak to a new utxo owned by mutlsig
----
-
-### `create_private_transfer_proposal`
-Create a **private** Cloak transfer proposal. Supports single and batch payouts.
-
-#### Single payout
-
-**Usage**
-```
-fortisX create_private_transfer_proposal \
-  --multisig <address> --mint <address> \
-  --commitment <bigint> --target <pubkey> --amount <lamports> \
-  [--deadline <seconds>]
-```
-
-**Example**
-```bash
-fortisX create_private_transfer_proposal \
+fortisX execute_private_proposal \
   --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
-  --mint So11111111111111111111111111111111111111112  \
-  --commitment 20386548276263145825368662695279343337887981784214581032640798115725144677639 \
-  --target ap5oPFPVSnxtc8bbvcCeKwy9Xnu5NePhMGzX2hexDVh \
-  --amount 10000000
-```
-
-#### Batch payouts
-
-**Usage**
-```
-fortisX create_private_transfer_proposal \
-  --multisig <address> --mint <address> \
-  --commitments "<c1>,<c2>,..." --targets "<pk1>,<pk2>,..." --amounts "<a1>,<a2>,..." \
-  [--deadline <seconds>] [--keypair <path>]
-```
-
-**Example**
-```bash
-fortisX create_private_transfer_proposal \
-  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
-  --mint 61ro7AExqfk4dZYoCyRzTahahCC2TdUUZ4M5epMPunJf \
-  --commitments "14996677493515651068783397139729104799819374275888258521843076605771731093339,15194954822714547376119163268215551182114727436326470719522714104672629813338" \
-  --targets "ap5oPFPVSnxtc8bbvcCeKwy9Xnu5NePhMGzX2hexDVh,9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin" \                                                                                                     
-  --amounts "10000000,10000000"
-
+  --proposal-number 2
 ```
 
 | Flag | Description | Default |
 |---|---|---|
-| `--keypair <path>` | Path to creator keypair JSON | `~/.config/solana/id.json` |
-| `--multisig <address>` | Multisig account address (base58) | ✅ Required |
-| `--mint <address>` | Asset (mint) address (base58) | ✅ Required |
-| `--commitments <values>` | UTXO commitments, comma-separated (decimal or 0x hex) | Batch mode |
-| `--targets <pubkeys>` | Recipient public keys, comma-separated (base58) | Batch mode |
-| `--amounts <values>` | Amounts in lamports, comma-separated | Batch mode |
-| `--commitment <value>` | Single UTXO commitment *(legacy)* | Single mode |
-| `--target <pubkey>` | Single recipient pubkey *(legacy)* | Single mode |
-| `--amount <value>` | Single amount in lamports *(legacy)* | Single mode |
-| `--deadline <seconds>` | Voting deadline in seconds | `86400` (1 day) |
+| `--multisig <address>` | Multisig account address (base58) | required |
+| `--proposal-number <value>` | Proposal number to execute | required |
+| `--utxo-file <path>` | Path to UTXO database file | `./treasury_utxos.json` |
+| `--collector-port <port>` | Port for share collector server | `3456` |
+| `--share-timeout-ms <ms>` | Timeout for share collection in milliseconds | `300000` |
 
-> **Note:** All batch arrays (`--commitments`, `--targets`, `--amounts`) must be the same length. Max 255 entries per proposal.
-
-**Descreption**
-
-this commnads ,allows creating a multi asset type ,multisi recipeitn ,payout progposal
 ---
 
-### `create_private_swap_proposal`
-Create a **private Cloak swap** proposal (token-to-token via a private UTXO).
+### submit_share
 
-**Usage**
+Fetch your encrypted Shamir share from the chain, decrypt it with your Solana keypair, and submit it to the collector server started by `execute_private_proposal`. Run this in a separate terminal while `execute_private_proposal` is waiting.
+
 ```
-fortisX create_private_swap_proposal \
-  --multisig <address> --mint <source-mint> \
-  --commitment <bigint|hex> --amount <input-units> \
-  --recipient-ata <pubkey> --target-mint <pubkey> \
-  [--deadline <seconds>]
+fortisX submit_share --multisig <address> [--collector-url <url>] [--insecure]
 ```
 
-**Example**
 ```bash
-fortisX create_private_swap_proposal \
+fortisX submit_share \
   --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
-  --mint So11111111111111111111111111111111111111112   \
-  --commitment 6342836635818038368715290775834697544185193584494730878152549536787210386746 \
-  --amount 10000000 \
-  --recipient-ata Bb4i1hout62G71odfmmwaBRcJCbQdn7LEpGFEX3z7vBA \
-  --target-mint 61ro7AExqfk4dZYoCyRzTahahCC2TdUUZ4M5epMPunJf   
+  --insecure
 ```
 
-| Flag | Description |
-|---|---|
-| `--multisig <address>` | Multisig account address (base58) | ✅ Required |
-| `--mint <pubkey>` | Source token mint (base58) | ✅ Required |
-| `--commitment <value>` | UTXO commitment to spend (decimal or 0x hex) | ✅ Required |
-| `--amount <value>` | Amount to swap in input token units | ✅ Required |
-| `--recipient-ata <pubkey>` | Recipient ATA for the output token (base58) | ✅ Required |
-| `--target-mint <pubkey>` | Mint of the token being swapped TO (base58) | ✅ Required |
-| `--deadline <seconds>` | Voting deadline in seconds | `86400` (1 day) |
-
----
-
-
-### `execute_private_proposal`
-Execute an approved **private** Cloak proposal. Starts a local share-collector server and waits for members to call `submit_share`.
-
-**Usage**
-```
-fortisX execute_private_proposal \
-  --multisig <address> --proposal-number <number> \
-  [--utxo-file <path>] [--dao-db <path>] [--cloak-program <address>]
-```
-
-**Example**
-```bash
-fortisX execute_private_proposal \
-  --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
-  --proposal-number 2 \
-```
-
-| Flag | Description |
+| Flag | Description | Default |
 |---|---|---|
-| `--multisig <address>` | Multisig account address (base58) |
-| `--proposal-number <value>` | Proposal number to execute (decimal or 0x hex) |
-
-**Descreption**
-
-execute private proposal ,looks at mentiosed utxo ,in the utxos_db ,and executes the transfer or swap proposal,for this purpose we need the mutlisig onwed utxo private key ,the way we get that is ,we start an https server ,the mebers fetch theri encrytped share from chain ,decryptes t ,and send it to the server ,the server ,combines the shares ,and recosntructs the key
----
-
-### `submit_share`
-Fetch, decrypt, and submit your **Shamir share** to the collector server started by `execute_private_proposal`.
-
-**Usage**
-```
-fortisX submit_share --multisig <address> [--insecure] [--timeout <ms>]
-```
-
-**Example**
-```bash
-fortisX submit_share   --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho --insecure
-```
-
-| Flag | Description |
-|---|---|---|
-| `--multisig <address>` | Multisig account address (base58) |
-| `--collector-url <url>` | Share collector endpoint URL | `http://localhost:3456/api/submit-share` |
-| `--insecure` | Allow self-signed HTTPS certs (local testing) | `false` |
+| `--multisig <address>` | Multisig account address (base58) | required |
+| `--collector-url <url>` | Share collector endpoint | `http://localhost:3456/api/submit-share` |
+| `--insecure` | Allow self-signed HTTPS certificates | `false` |
 | `--timeout <ms>` | Request timeout in milliseconds | `30000` |
 
 ---
 
-### `scan-compliance`
-Scan Cloak transaction history for compliance/auditing using a viewing key.
+### scan-compliance
 
-**Usage**
+Scan Cloak transaction history for a given viewing key. The viewing key is derived from the treasury UTXO private key and can be scoped to a time range for external auditors.
+
 ```
 fortisX scan-compliance --viewing-key <base58> [--limit <number>]
 ```
 
-**Example**
 ```bash
 fortisX scan-compliance \
   --viewing-key 9TesvoxeQCbF5Fu4Ym5fE1YEBZZDjyAuA9ozsayqg8SC \
@@ -390,27 +365,58 @@ fortisX scan-compliance \
 
 | Flag | Description | Default |
 |---|---|---|
-| `--viewing-key <key>` | Base58-encoded viewing key (`nk`, 32 bytes) | ✅ Required |
-| `--rpc <url>` | Solana RPC URL | Helius Devnet |
+| `--viewing-key <key>` | Base58-encoded viewing key (nk, 32 bytes) | required |
+| `--rpc <url>` | Solana RPC URL | Helius devnet |
 | `--limit <number>` | Maximum number of transactions to scan | — |
 
 ---
 
-## Typical Workflow
+## Global flags
+
+Available on all commands.
+
+| Flag | Description | Default |
+|---|---|---|
+| `--keypair <path>` | Path to signer keypair JSON | `KEYPAIR_PATH` env or `~/.config/solana/id.json` |
+| `--rpc <url>` | Solana RPC URL | `SOLANA_RPC_URL` env or Helius devnet |
+| `--commitment <level>` | RPC commitment level (`processed`, `confirmed`, `finalized`) | `confirmed` |
+
+---
+
+## Typical workflow
 
 ```
-1. create_multisig                   → set up the multisig with members & threshold
-2. public_deposit                    → fund the public treasury  OR
-   cloak_deposit                     → mint a private UTXO via Cloak
-   private_deposit                   → move UTXO funds into the multisig treasury
-3. create_transfer_proposal          → propose a public transfer  OR
-   create_private_transfer_proposal  → propose a private Cloak transfer  OR
-   create_private_swap_proposal      → propose a private token swap
-4. approve_proposal                  → each required member approves
-5. execute_proposal                  → execute a public proposal  OR
-   execute_private_proposal          → executor starts collector; members run submit_share
-6. scan-compliance                   → audit private transactions with a viewing key
+1. create_multisig
+   Set up the multisig with members and threshold. Treasury key is split and encrypted on-chain.
+
+2. Fund the treasury
+   public_deposit          — fund the public treasury
+   cloak_deposit           — mint a private UTXO via Cloak
+   private_deposit         — move a UTXO into the multisig treasury
+
+3. Create a proposal
+   create_transfer_proposal          — public SOL transfer
+   create_private_transfer_proposal  — private Cloak transfer (single or batch)
+   create_private_swap_proposal      — private token swap via Cloak
+
+4. approve_proposal
+   Each required member approves before the deadline.
+
+5. Execute
+   execute_proposal          — execute a public proposal
+   execute_private_proposal  — start the collector; each member runs submit_share
+
+6. scan-compliance
+   Audit private transactions using a viewing key.
 ```
+
+---
+
+## Program IDs
+
+| Program | Address |
+|---|---|
+| FortisX (devnet) | `E5ndMCsAHNhS6ZmgLNBFbGH3Hvq5qfzVb6oGBNbEiPV1` |
 
 ---
 
