@@ -416,7 +416,7 @@ Available on all commands.
 
 | Program | Address |
 |---|---|
-| FortisX (devnet) | `E5ndMCsAHNhS6ZmgLNBFbGH3Hvq5qfzVb6oGBNbEiPV1` |
+| FortisX (devnet) | `CD6Pnc1gpUQ1XT1bzXEPs2QnqFMcQUHsiRKAV9iYXh36` |
 
 ---
 
