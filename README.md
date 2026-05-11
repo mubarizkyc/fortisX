@@ -57,6 +57,10 @@ fortisX --help
 
 ---
 
+wipe previous record before each new multisig creation
+```bash
+> cloak_deposits.txt &&  > proposal_history.json &&  > my_utxo_logs.txt  &&  > swap_proposal_history.json &&  > treasury_utxos.json 
+```
 ### create_multisig
 
 Create a new on-chain multisig. Generates a treasury UTXO keypair, splits the private key via Shamir Secret Sharing, encrypts each share with the corresponding member's public key, and stores everything on-chain.
@@ -200,9 +204,9 @@ fortisX create_private_transfer_proposal \
 ```bash
 fortisX create_private_transfer_proposal \
   --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
-  --mint 61ro7AExqfk4dZYoCyRzTahahCC2TdUUZ4M5epMPunJf \
-  --commitments "14996677493515651068783397139729104799819374275888258521843076605771731093339,15194954822714547376119163268215551182114727436326470719522714104672629813338" \
-  --targets "ap5oPFPVSnxtc8bbvcCeKwy9Xnu5NePhMGzX2hexDVh,9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin" \
+  --mint So11111111111111111111111111111111111111112 \
+  --commitments "3908616254283626232516298147628320137964133889473679795009811424391216960327,7507838035974423991802735548776930883407129700470938034699747284769689014606" \
+  --targets "ap5oPFPVSnxtc8bbvcCeKwy9Xnu5NePhMGzX2hexDVh,9PkS1eTC4G85Quw5LTcaWUTbvj8bgxMJrvw7LDhQ1i6q" \
   --amounts "10000000,10000000"
 ```
 
@@ -238,7 +242,7 @@ fortisX create_private_swap_proposal \
 fortisX create_private_swap_proposal \
   --multisig BLUHe8sSDcPBQ5TH6BPJPNZVStqprZpZgg3wK8i4LRho \
   --mint So11111111111111111111111111111111111111112 \
-  --commitment 6342836635818038368715290775834697544185193584494730878152549536787210386746 \
+  --commitment 21042323331920799627000785245834848968968706624024230582489341366524531731353 \
   --amount 10000000 \
   --recipient-ata Bb4i1hout62G71odfmmwaBRcJCbQdn7LEpGFEX3z7vBA \
   --target-mint 61ro7AExqfk4dZYoCyRzTahahCC2TdUUZ4M5epMPunJf
